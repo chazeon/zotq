@@ -15,6 +15,12 @@ dependencies = [
 zotq = "zotq.cli:main"
 zotquery = "zotq.cli:main"
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0.2",
+  "respx>=0.22.0",
+]
+
 [build-system]
 requires = ["hatchling>=1.24.0"]
 build-backend = "hatchling.build"

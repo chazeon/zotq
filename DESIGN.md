@@ -38,7 +38,7 @@ Tech constraints:
   - `index status`
   - `index sync`
   - `index rebuild`
-- PDF/text attachment extraction and chunking.
+- Metadata-first indexing and chunking (attachment extraction remains extensible roadmap work).
 - Local index storage for lexical + vector retrieval.
 - Config precedence: CLI > env vars > TOML > defaults.
 
@@ -73,7 +73,7 @@ Click CLI
 - `SourceAdapter` (Protocol/ABC)
   - Reads items/collections/tags and attachment references from source.
 - `ContentPipeline`
-  - Extracts text from PDFs/HTML/text attachments.
+  - Uses metadata-first text extraction in v1; attachment extractors remain pluggable roadmap work.
   - Produces normalized chunks with metadata.
 - `IndexService`
   - Writes/updates lexical and vector indexes.
@@ -104,37 +104,145 @@ Click CLI
 
 ## 5. Search and Index Design
 
-### 5.1 Search Modes
-- `keyword`
-  - Lexical ranking (BM25/FTS style).
-- `fuzzy`
-  - Typo-tolerant matching (trigram/edit-distance strategy).
-- `semantic`
-  - Cosine-like similarity over locally indexed chunk vectors.
-- `hybrid`
-  - Combines lexical and vector candidates with `alpha` weighting over normalized per-query signals.
+### 5.1 Current v1 Behavior
+- Local lexical index: SQLite + FTS5 (`documents`, `chunks`, `chunks_fts`).
+- Local vector index: SQLite table of chunk embeddings.
+- Search modes:
+  - `keyword`: FTS5/BM25-derived score.
+  - `fuzzy`: `SequenceMatcher` over title + indexed text.
+  - `semantic`: vector similarity.
+  - `hybrid`: normalized lexical/vector fusion with `alpha`.
+- Incremental sync default:
+  - `index sync` updates changed items only (content-hash based).
+  - `index sync --full` and `index rebuild` force full reprocessing.
+- Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
 
-### 5.2 Fallback and Capability Rules
+### 5.2 v2 Goals
+- Add fields over time (for example DOI, journal, publisher) without expensive full rebuilds.
+- Support exact identifier lookup (DOI first) separate from lexical/semantic scoring.
+- Keep lexical updates cheap and frequent.
+- Re-embed vectors only when semantic source text changes.
+- Maintain resumable indexing behavior after interruption.
+
+### 5.3 Layered Index Architecture (v2)
+Separate metadata, lexical, and vector concerns:
+
+1. `MetadataStore` (SQLite)
+   - Canonical item row.
+   - Flexible per-field rows.
+   - Creator rows.
+   - Identifier lookup rows.
+2. `LexicalStore` (SQLite FTS5)
+   - Field-aware columns (`title`, `abstract`, `journal`, `creators`, `tags`, `body`) instead of one `full_text` blob.
+3. `VectorStore` (SQLite)
+   - Chunk rows + embeddings.
+4. `CheckpointStore`
+   - Sync watermark and resumable progress.
+
+### 5.4 Logical Schema (v2)
+```sql
+CREATE TABLE items (
+  item_key TEXT PRIMARY KEY,
+  item_type TEXT,
+  title TEXT,
+  date TEXT,
+  doi_norm TEXT,
+  raw_json TEXT NOT NULL,
+  lexical_hash TEXT NOT NULL,
+  vector_hash TEXT NOT NULL,
+  lexical_profile_version INTEGER NOT NULL,
+  vector_profile_version INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE item_fields (
+  item_key TEXT NOT NULL,
+  field_name TEXT NOT NULL,
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  value_raw TEXT,
+  value_norm TEXT,
+  value_hash TEXT NOT NULL,
+  PRIMARY KEY (item_key, field_name, ordinal)
+);
+
+CREATE TABLE item_creators (
+  item_key TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  creator_type TEXT,
+  family TEXT,
+  given TEXT,
+  full_norm TEXT,
+  key_norm TEXT,
+  PRIMARY KEY (item_key, ordinal)
+);
+
+CREATE TABLE identifiers (
+  id_type TEXT NOT NULL,
+  id_norm TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  PRIMARY KEY (id_type, id_norm, item_key)
+);
+
+CREATE TABLE lexical_docs (
+  item_key TEXT PRIMARY KEY,
+  title TEXT,
+  abstract TEXT,
+  journal TEXT,
+  creators TEXT,
+  tags TEXT,
+  body TEXT
+);
+
+CREATE VIRTUAL TABLE lexical_fts USING fts5(
+  item_key UNINDEXED,
+  title, abstract, journal, creators, tags, body,
+  tokenize='unicode61 remove_diacritics 2'
+);
+```
+
+### 5.5 Hash and Version Strategy
+- `lexical_hash`
+  - Derived from fields used by metadata + FTS projection.
+  - Changes trigger only metadata/lexical updates.
+- `vector_hash`
+  - Derived from semantic text inputs and embedding profile (`provider`, `model`, dimensions).
+  - Changes trigger rechunk/re-embed.
+- `lexical_profile_version` and `vector_profile_version`
+  - Allow explicit rollout of new field mappings or chunking policy.
+  - Only rows with hash/version mismatch are reprocessed.
+
+### 5.6 Ingestion and Sync Lifecycle (v2)
+1. Fetch candidate items from source.
+2. Normalize core metadata, identifiers (DOI), and creators.
+3. Compute lexical and vector hashes.
+4. If lexical changed: upsert `items`, `item_fields`, `item_creators`, `identifiers`, `lexical_docs`, FTS rows.
+5. If vector changed: regenerate chunks and embeddings only for changed items.
+6. Commit in bounded batches and checkpoint progress.
+7. Resume safely after interruption.
+
+### 5.7 Query Pipeline (v2)
+1. Identifier short-circuit:
+   - If `--doi` provided (or DOI pattern detected), resolve through `identifiers` first.
+2. Structured filtering:
+   - Apply `item_type`, date range, creator/tag/field filters from normalized tables.
+3. Retrieval mode execution:
+   - `keyword`: FTS5 BM25 with column-aware weighting.
+   - `fuzzy`: typo-tolerant lexical matching.
+   - `semantic`: vector similarity over chunk embeddings.
+   - `hybrid`: normalized lexical + vector score fusion.
+4. Output includes `requested_mode` and `executed_mode`.
+
+### 5.8 Author Encoding
+- Store creators in normalized rows (`family`, `given`, `full_norm`, `key_norm`, `ordinal`).
+- Build FTS `creators` text projection using display and normalized variants.
+- Ranking may apply small boosts for first-author exact/family matches.
+
+### 5.9 Fallback and Capability Rules
 - Backends/index services expose capabilities.
 - If mode unsupported:
   - `--no-allow-fallback`: return `mode_not_supported` error.
   - `--allow-fallback`: downgrade to `keyword`.
-- Output includes `requested_mode` and `executed_mode`.
-
-### 5.3 Ingestion Pipeline
-1. Discover changed/new items from source adapter.
-2. Resolve attachment files/URLs.
-3. Extract text (PDF/HTML/TXT handlers).
-4. Normalize text + metadata.
-5. Chunk into retrieval units.
-6. Generate embeddings for chunks when semantic index is enabled.
-7. Upsert chunks into lexical and vector indexes.
-8. Persist sync checkpoints.
-
-### 5.4 PDF Handling
-- Treat PDFs as source-of-truth attachments.
-- Store extracted text/chunks with `item_key`, attachment id, and page metadata when available.
-- Do not mutate source PDFs.
+- Exact identifier lookups bypass fallback logic unless explicit fallback is requested.
 
 ## 6. CLI API Design
 
@@ -163,6 +271,7 @@ Click CLI
 ### 6.4 Search Options (`search run`)
 - `QUERY` positional argument (preferred)
 - `--text`
+- `--doi` (planned v2 exact identifier short-circuit)
 - `--search-mode [keyword|fuzzy|semantic|hybrid]`
 - `--allow-fallback/--no-allow-fallback`
 - `--title`
@@ -274,6 +383,21 @@ embedding_api_key = ""
 embedding_timeout_seconds = 30
 embedding_max_retries = 2
 
+# planned v2 knobs
+lexical_profile_version = 2
+vector_profile_version = 2
+
+[profiles.default.index.lexical_fields]
+title = { weight = 6 }
+abstract = { weight = 3 }
+journal = { weight = 2, aliases = ["publicationTitle"] }
+creators = { weight = 4 }
+tags = { weight = 2 }
+body = { weight = 1 }
+
+[profiles.default.index.vector_fields]
+fields = ["title", "abstract", "body"]
+
 [profiles.default.local_api]
 base_url = "http://127.0.0.1:23119"
 api_key = ""
@@ -329,7 +453,7 @@ src/zotq/
     __init__.py
     base.py
     local_provider.py
-    external_provider.py
+    external_providers.py
   storage/
     __init__.py
     lexical_index.py

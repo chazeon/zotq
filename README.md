@@ -2,6 +2,20 @@
 
 `zotq` is a Python CLI for querying Zotero through HTTP backends with one consistent interface.
 
+## Install Dependencies
+Core install:
+
+```bash
+uv sync
+```
+
+Install development dependencies (both forms are supported):
+
+```bash
+uv sync --group dev
+uv sync --extra dev
+```
+
 ## Backends
 - `local-api`: talks to the Zotero Desktop local API.
 - `remote`: talks to a self-hosted or cloud API service.
