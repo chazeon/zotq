@@ -1,0 +1,14 @@
+# Local configs/secrets
+config.local.toml
+
+# Local indexes/data
+.zotq-index-gemini/
+
+# Python env/cache
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
