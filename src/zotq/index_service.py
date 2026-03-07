@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+from time import perf_counter
 
 from .embeddings import build_embedding_provider
 from .errors import IndexNotReadyError, ModeNotSupportedError
@@ -14,6 +16,87 @@ from .pipeline import chunk_text, extract_item_text
 from .storage import CheckpointStore, LexicalIndex, VectorIndex
 
 ProgressCallback = Callable[[str, int, int | None], None]
+
+
+@dataclass
+class StageTiming:
+    started_at: float
+    ended_at: float
+    events: int
+    current: int
+    total: int | None
+
+
+class RetrievalBenchmarkHarness:
+    """Collects per-phase timing and progress counters for index lifecycle runs."""
+
+    def __init__(self, *, now_fn: Callable[[], float] | None = None) -> None:
+        self._now = now_fn or perf_counter
+        self._started_at = self._now()
+        self._stages: dict[str, StageTiming] = {}
+        self._last_phase: str | None = None
+        self._finished = False
+
+    def observe(self, phase: str, current: int, total: int | None) -> None:
+        now = self._now()
+        phase_name = (phase or "").strip().lower()
+        if not phase_name:
+            return
+
+        if self._last_phase and self._last_phase != phase_name:
+            prev = self._stages.get(self._last_phase)
+            if prev is not None and prev.ended_at < now:
+                prev.ended_at = now
+
+        stage = self._stages.get(phase_name)
+        if stage is None:
+            self._stages[phase_name] = StageTiming(
+                started_at=now,
+                ended_at=now,
+                events=1,
+                current=max(0, current),
+                total=total,
+            )
+            self._last_phase = phase_name
+            return
+
+        stage.events += 1
+        stage.current = max(0, current)
+        stage.total = total
+        stage.ended_at = now
+        self._last_phase = phase_name
+
+    @staticmethod
+    def _elapsed_ms(started_at: float, ended_at: float) -> int:
+        return max(0, int(round((ended_at - started_at) * 1000)))
+
+    def finish(self) -> dict[str, object]:
+        if self._finished:
+            return self._build_payload(self._now())
+        self._finished = True
+        return self._build_payload(self._now())
+
+    def _build_payload(self, finished_at: float) -> dict[str, object]:
+        if self._last_phase:
+            last_stage = self._stages.get(self._last_phase)
+            if last_stage is not None and last_stage.ended_at < finished_at:
+                last_stage.ended_at = finished_at
+
+        stages_payload: dict[str, dict[str, int | None]] = {}
+        stage_order: list[str] = []
+        for phase, stage in self._stages.items():
+            stage_order.append(phase)
+            stages_payload[phase] = {
+                "events": stage.events,
+                "current": stage.current,
+                "total": stage.total,
+                "elapsed_ms": self._elapsed_ms(stage.started_at, stage.ended_at),
+            }
+        return {
+            "total_ms": self._elapsed_ms(self._started_at, finished_at),
+            "stage_order": stage_order,
+            "stages": stages_payload,
+        }
 
 
 class MockIndexService:

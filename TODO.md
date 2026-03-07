@@ -7,7 +7,8 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S0` (`done`) Baseline docs commit (`d88c964`) for DESIGN/TODO runbook.
 - [x] `S1` (`done`) Dependency bootstrap (`sqlite-vec` + BibTeX parser) and smoke coverage.
 - [x] `S2` (`done`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
-- [ ] `S3` (`in_progress`) Execute P0 benchmark harness (`T0.3`) with tests first.
+- [x] `S3` (`done`) Execute P0 benchmark harness (`T0.3`) with tests first.
+- [ ] `S4` (`in_progress`) Start P1 retrieval overhead work (`T1.1`/`T1.2`/`T1.3`).
 
 ## P0 Contracts and Benchmarks
 
@@ -19,7 +20,7 @@ Status values: `todo`, `in_progress`, `done`.
   - Files: `src/zotq/models.py`, `src/zotq/config.py`, `README.md`, `DESIGN.md`.
   - Tests: `tests/test_config_precedence.py`.
 
-- [ ] `T0.3` (`todo`) Add retrieval benchmark harness and stage timing.
+- [x] `T0.3` (`done`) Add retrieval benchmark harness and stage timing.
   - Files: `src/zotq/index_service.py`, `src/zotq/cli.py`.
   - Tests: `tests/test_index_progress.py`.
 

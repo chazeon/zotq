@@ -11,6 +11,7 @@ from .client import ZotQueryClient
 from .config import apply_cli_overrides, load_app_config
 from .contracts import build_cli_api_contract
 from .errors import BackendConnectionError, ConfigError, IndexNotReadyError, ModeNotSupportedError
+from .index_service import RetrievalBenchmarkHarness
 from .models import AppConfig, Mode, OutputFormat, QuerySpec, SearchBackend, SearchDefaultsConfig, SearchMode, SearchResult
 from .output import render_payload
 
@@ -79,10 +80,12 @@ def _build_search_debug_payload(result: SearchResult, query: QuerySpec) -> dict[
     }
 
 
-def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
-    enable_progress = runtime.output == OutputFormat.TABLE
+def _run_with_index_progress(runtime: RuntimeContext, action: str, fn, *, show_progress: bool = True):
+    benchmark = RetrievalBenchmarkHarness()
+    enable_progress = show_progress and runtime.output == OutputFormat.TABLE
     if not enable_progress:
-        return fn(None)
+        status = fn(lambda phase, current, total: benchmark.observe(phase, current, total))
+        return status, benchmark.finish()
 
     with Progress(
         SpinnerColumn(),
@@ -101,6 +104,7 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
 
         def callback(phase: str, current: int, total: int | None) -> None:
             nonlocal index_started, enrich_started
+            benchmark.observe(phase, current, total)
             if phase == "collect":
                 if total is not None and total > 0:
                     progress.update(collect_task, total=total)
@@ -146,7 +150,7 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
             progress.update(index_task, description=f"{action.capitalize()} index (done)")
         if enrich_started:
             progress.update(enrich_task, description="Enriching metadata (done)")
-        return status
+        return status, benchmark.finish()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -472,18 +476,16 @@ def index_sync(runtime: RuntimeContext, full: bool, profiles_only: bool, show_pr
     if full and profiles_only:
         raise click.ClickException("--profiles-only cannot be combined with --full.")
     try:
-        if show_progress:
-            status_obj = _run_with_index_progress(
-                runtime,
-                "sync",
-                lambda progress: runtime.client.index_sync(full=full, profiles_only=profiles_only, progress=progress),
-            )
-        else:
-            status_obj = runtime.client.index_sync(full=full, profiles_only=profiles_only)
+        status_obj, benchmark = _run_with_index_progress(
+            runtime,
+            "sync",
+            lambda progress: runtime.client.index_sync(full=full, profiles_only=profiles_only, progress=progress),
+            show_progress=show_progress,
+        )
         status = status_obj.model_dump(mode="json")
     except (BackendConnectionError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"action": "sync", "full": full, "profiles_only": profiles_only, "status": status}
+    payload = {"action": "sync", "full": full, "profiles_only": profiles_only, "status": status, "benchmark": benchmark}
     click.echo(render_payload(payload, runtime.output))
 
 
@@ -492,14 +494,16 @@ def index_sync(runtime: RuntimeContext, full: bool, profiles_only: bool, show_pr
 @pass_runtime
 def index_rebuild(runtime: RuntimeContext, show_progress: bool) -> None:
     try:
-        if show_progress:
-            status_obj = _run_with_index_progress(runtime, "rebuild", lambda progress: runtime.client.index_rebuild(progress=progress))
-        else:
-            status_obj = runtime.client.index_rebuild()
+        status_obj, benchmark = _run_with_index_progress(
+            runtime,
+            "rebuild",
+            lambda progress: runtime.client.index_rebuild(progress=progress),
+            show_progress=show_progress,
+        )
         status = status_obj.model_dump(mode="json")
     except BackendConnectionError as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"action": "rebuild", "status": status}
+    payload = {"action": "rebuild", "status": status, "benchmark": benchmark}
     click.echo(render_payload(payload, runtime.output))
 
 
@@ -516,17 +520,15 @@ def index_rebuild(runtime: RuntimeContext, show_progress: bool) -> None:
 @pass_runtime
 def index_enrich(runtime: RuntimeContext, field: str, show_progress: bool) -> None:
     try:
-        if show_progress:
-            result = _run_with_index_progress(
-                runtime,
-                "enrich",
-                lambda progress: runtime.client.index_enrich(field=field, progress=progress),
-            )
-        else:
-            result = runtime.client.index_enrich(field=field)
+        result, benchmark = _run_with_index_progress(
+            runtime,
+            "enrich",
+            lambda progress: runtime.client.index_enrich(field=field, progress=progress),
+            show_progress=show_progress,
+        )
     except (BackendConnectionError, IndexNotReadyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"action": "enrich", "field": field, "results": result}
+    payload = {"action": "enrich", "field": field, "results": result, "benchmark": benchmark}
     click.echo(render_payload(payload, runtime.output))
 
 
