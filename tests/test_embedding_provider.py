@@ -10,6 +10,7 @@ from zotq.embeddings import (
     LocalEmbeddingProvider,
     OllamaEmbeddingProvider,
     OpenAIEmbeddingProvider,
+    PortableLocalEmbeddingProvider,
     build_embedding_provider,
 )
 from zotq.errors import ConfigError
@@ -129,3 +130,35 @@ def test_build_embedding_provider_gemini() -> None:
     assert isinstance(provider, GeminiEmbeddingProvider)
     assert provider.provider_name == "gemini"
     assert provider.model_name == "gemini-embedding-001"
+
+
+def test_build_embedding_provider_fastembed_alias_uses_portable_provider() -> None:
+    cfg = IndexConfig(
+        enabled=True,
+        index_dir="~/.cache/zotq",
+        embedding_provider="fastembed",
+        embedding_model="BAAI/bge-small-en-v1.5",
+    )
+
+    provider = build_embedding_provider(cfg)
+    assert isinstance(provider, PortableLocalEmbeddingProvider)
+    assert provider.provider_name == "portable-local"
+
+
+def test_portable_provider_fallback_to_local_hash_when_fastembed_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zotq.embeddings import portable_provider
+
+    def _raise_module_not_found(_name: str):
+        raise ModuleNotFoundError("fastembed missing")
+
+    monkeypatch.setattr(portable_provider.importlib, "import_module", _raise_module_not_found)
+    provider = PortableLocalEmbeddingProvider(model="BAAI/bge-small-en-v1.5")
+
+    assert provider.fallback_active is True
+    assert provider.fallback_reason == "fastembed_unavailable"
+    assert provider.runtime_backend == "local-hash"
+
+    first = provider.embed_text("mantle hydration")
+    second = provider.embed_text("mantle hydration")
+    assert first == second
+    assert len(first) == provider.fallback_dimensions

@@ -14,7 +14,8 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S7` (`done`) Execute `T3.1`: vector backend abstraction (`python|sqlite-vec`) + parity tests.
 - [x] `S8` (`done`) Execute `T3.2`: migration/backfill path for sqlite-vec cutover.
 - [x] `S9` (`done`) Execute `T3.3`: preflight readiness output for vector backend state.
-- [ ] `S10` (`in_progress`) Start `T4.1`: portable local embedding provider path.
+- [x] `S10` (`done`) Execute `T4.1`: portable local embedding provider path with explicit fallback.
+- [ ] `S11` (`in_progress`) Start `T4.2`: semantic/hybrid remote-dependency query guards.
 
 ## P0 Contracts and Benchmarks
 
@@ -74,11 +75,11 @@ Status values: `todo`, `in_progress`, `done`.
 
 ## P4 Portable Local Embeddings and Guards
 
-- [ ] `T4.1` (`in_progress`) Add local portable embedding provider (`fastembed`-class) with explicit fallback.
+- [x] `T4.1` (`done`) Add local portable embedding provider (`fastembed`-class) with explicit fallback.
   - Files: `src/zotq/embeddings/factory.py`, new provider module.
   - Tests: `tests/test_embedding_provider.py`.
 
-- [ ] `T4.2` (`todo`) Add semantic/hybrid remote-dependency query guards.
+- [ ] `T4.2` (`in_progress`) Add semantic/hybrid remote-dependency query guards.
   - Files: `src/zotq/index_service.py`, `src/zotq/client.py`.
   - Tests: `tests/test_semantic_offline_guards.py`.
 

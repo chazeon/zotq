@@ -7,6 +7,7 @@ from ..models import IndexConfig
 from .base import EmbeddingProvider
 from .external_providers import GeminiEmbeddingProvider, OllamaEmbeddingProvider, OpenAIEmbeddingProvider
 from .local_provider import LocalEmbeddingProvider
+from .portable_provider import PortableLocalEmbeddingProvider
 
 
 def build_embedding_provider(config: IndexConfig) -> EmbeddingProvider:
@@ -16,6 +17,9 @@ def build_embedding_provider(config: IndexConfig) -> EmbeddingProvider:
     if provider == "local":
         model = model or "local-hash-v1"
         return LocalEmbeddingProvider(model=model)
+
+    if provider in {"portable", "local-portable", "fastembed"}:
+        return PortableLocalEmbeddingProvider(model=model or "BAAI/bge-small-en-v1.5")
 
     if provider == "openai":
         if not config.embedding_api_key:

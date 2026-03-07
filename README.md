@@ -306,6 +306,7 @@ When multiple BibTeX chunks are rendered together (for example multi-key reads),
 
 ## Embeddings
 - `local`: deterministic hashing model, no extra dependencies.
+- `fastembed` / `portable` / `local-portable`: portable local embedding path with explicit fallback to local hashing when `fastembed` is unavailable.
 - `openai`: REST-based embedding requests (`embedding_api_key` required).
 - `ollama`: local Ollama API (`/api/embed`, with legacy `/api/embeddings` fallback).
 - `gemini` (or `google`): Google Gemini embedding API (`embedding_api_key` required).
