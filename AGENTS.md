@@ -37,6 +37,7 @@ Before implementing behavior-heavy features:
 - `search run` supports `--backend [auto|source|index]`; preserve deterministic routing semantics.
 - `--output bib` means Zotero `format=bib` (CSL formatted output, often HTML-like).
 - `--output bibtex` means Zotero `format=bibtex` (LaTeX BibTeX entries).
+- `item citekey` supports `--prefer [auto|json|extra|rpc|bibtex]`; keep `auto` fallback order stable.
 - DOI matching must stay normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
 - Citation-key search must remain case-insensitive and support `extra` fallback parsing (`Citation Key: ...`).
 

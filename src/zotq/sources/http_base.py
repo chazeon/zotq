@@ -133,6 +133,9 @@ class HttpZoteroSourceAdapter(SourceAdapter):
         text = response.text.strip()
         return text or None
 
+    def get_item_citation_key_rpc(self, key: str) -> str | None:
+        return None
+
     def get_items_bibtex(self, keys: list[str]) -> str | None:
         clean_keys = [key.strip() for key in keys if key and key.strip()]
         if not clean_keys:

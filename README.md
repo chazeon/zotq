@@ -208,7 +208,18 @@ Resolve citation key:
 
 ```bash
 uv run zotq --mode local-api item citekey XVMVWQZX
+uv run zotq --mode local-api item citekey XVMVWQZX --prefer auto
+uv run zotq --mode local-api item citekey XVMVWQZX --prefer rpc
+uv run zotq --mode local-api item citekey XVMVWQZX --prefer bibtex
 ```
+
+`--prefer` controls citation-key resolution source:
+- `auto`: try `item.citationKey`, then `extra` (`Citation Key: ...`), then Better BibTeX RPC, then BibTeX parse fallback.
+- `json|extra|rpc|bibtex`: force a single source with no fallback.
+
+Better BibTeX RPC requires the Better BibTeX plugin in Zotero and uses:
+- `POST http://127.0.0.1:23119/better-bibtex/json-rpc`
+- method: `item.citationkey`
 
 Bibliography output:
 

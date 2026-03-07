@@ -261,6 +261,40 @@ def test_item_citekey_returns_citation_key() -> None:
     assert payload["item_key"] == "XVMVWQZX"
     assert payload["citation_key"] == "staceyThermodynamicsGruneisenParameter2019"
     assert payload["source"] == "item.citation_key"
+    assert payload["prefer"] == "auto"
+
+
+@respx.mock
+def test_item_citekey_supports_prefer_bibtex() -> None:
+    respx.get("http://remote.test/users/0/items/XVMVWQZX", params={"format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{staceyFromBibtex2019,}")
+    )
+    respx.get("http://remote.test/users/0/items/XVMVWQZX").mock(
+        return_value=Response(
+            200,
+            json={
+                "key": "XVMVWQZX",
+                "data": {
+                    "itemType": "journalArticle",
+                    "title": "Thermodynamics with the Gruneisen parameter",
+                    "citationKey": "staceyThermodynamicsGruneisenParameter2019",
+                },
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        ["--output", "json", "item", "citekey", "XVMVWQZX", "--prefer", "bibtex"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["found"] is True
+    assert payload["citation_key"] == "staceyFromBibtex2019"
+    assert payload["source"] == "bibtex"
+    assert payload["prefer"] == "bibtex"
 
 
 @respx.mock

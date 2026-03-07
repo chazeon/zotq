@@ -119,38 +119,44 @@ class ZotQueryClient:
             return None
         return match.group(1).strip() or None
 
-    def get_item_citation_key(self, key: str) -> dict[str, str | bool | None]:
+    def get_item_citation_key(self, key: str, *, prefer: str = "auto") -> dict[str, str | bool | None]:
+        prefer_mode = prefer.strip().lower()
         item = self.get_item(key)
         if item is None:
-            return {"found": False, "item_key": key, "citation_key": None, "source": None}
+            return {"found": False, "item_key": key, "citation_key": None, "source": None, "prefer": prefer_mode}
 
-        if item.citation_key:
-            return {
-                "found": True,
-                "item_key": key,
-                "citation_key": item.citation_key,
-                "source": "item.citation_key",
+        candidates: list[tuple[str, str | None]] = [
+            ("item.citation_key", item.citation_key),
+            ("item.extra", self._citation_key_from_extra(item.extra)),
+            ("rpc", self._source.get_item_citation_key_rpc(key)),
+            ("bibtex", self._citation_key_from_bibtex(self._source.get_item_bibtex(key))),
+        ]
+
+        if prefer_mode == "auto":
+            ordered = candidates
+        else:
+            prefer_map = {
+                "json": "item.citation_key",
+                "extra": "item.extra",
+                "rpc": "rpc",
+                "bibtex": "bibtex",
             }
+            selected = prefer_map.get(prefer_mode)
+            if selected is None:
+                raise ValueError(f"Unsupported citation key preference: {prefer}")
+            ordered = [entry for entry in candidates if entry[0] == selected]
 
-        from_extra = self._citation_key_from_extra(item.extra)
-        if from_extra:
-            return {
-                "found": True,
-                "item_key": key,
-                "citation_key": from_extra,
-                "source": "item.extra",
-            }
+        for source, value in ordered:
+            if value and value.strip():
+                return {
+                    "found": True,
+                    "item_key": key,
+                    "citation_key": value.strip(),
+                    "source": source,
+                    "prefer": prefer_mode,
+                }
 
-        from_bibtex = self._citation_key_from_bibtex(self._source.get_item_bibtex(key))
-        if from_bibtex:
-            return {
-                "found": True,
-                "item_key": key,
-                "citation_key": from_bibtex,
-                "source": "bibtex",
-            }
-
-        return {"found": True, "item_key": key, "citation_key": None, "source": None}
+        return {"found": True, "item_key": key, "citation_key": None, "source": None, "prefer": prefer_mode}
 
     def get_item_bibliography(
         self,

@@ -274,7 +274,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq system health`
 - `zotq search run [QUERY] [options]`
 - `zotq item get KEY`
-- `zotq item citekey KEY`
+- `zotq item citekey KEY [--prefer auto|json|extra|rpc|bibtex]`
 - `zotq collection list`
 - `zotq tag list`
 - `zotq index status`
@@ -338,6 +338,15 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - `--output bibtex`
   - Uses Zotero API `format=bibtex` for LaTeX/BibTeX entries.
   - Does not accept CSL-only flags (`style`, `locale`, `linkwrap`).
+
+### 6.8 Citation Key Resolution (`item citekey`)
+- `--prefer auto` (default)
+  - Resolution order: `citationKey` field -> `extra` parse (`Citation Key: ...`) -> Better BibTeX JSON-RPC -> BibTeX parse.
+- `--prefer json|extra|rpc|bibtex`
+  - Restricts lookup to one source only (no fallback chain).
+- Better BibTeX RPC endpoint (optional):
+  - `POST /better-bibtex/json-rpc`
+  - method: `item.citationkey`
 - For search result sets, bibliography and bibtex retrieval are batched via `itemKey=K1,K2,...` where supported.
 - Authentication model:
   - `local-api`: typically no API key required when local API access is enabled in Zotero Desktop.

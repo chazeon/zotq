@@ -107,6 +107,12 @@ class MockSourceAdapter:
         title = item.title or item.key
         return f"@article{{{citekey},\n  title = {{{title}}},\n}}\n"
 
+    def get_item_citation_key_rpc(self, key: str) -> str | None:
+        item = self.get_item(key)
+        if item is None:
+            return None
+        return item.citation_key
+
     def get_items_bibtex(self, keys: list[str]) -> str | None:
         entries: list[str] = []
         for key in keys:

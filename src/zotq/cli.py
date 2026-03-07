@@ -321,10 +321,20 @@ def item_get(runtime: RuntimeContext, key: str, style: str | None, locale: str |
 
 @item_group.command("citekey")
 @click.argument("key", required=True)
+@click.option(
+    "prefer",
+    "--prefer",
+    type=click.Choice(["auto", "json", "extra", "bibtex", "rpc"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Citation key source preference.",
+)
 @pass_runtime
-def item_citekey(runtime: RuntimeContext, key: str) -> None:
+def item_citekey(runtime: RuntimeContext, key: str, prefer: str) -> None:
     try:
-        payload = runtime.client.get_item_citation_key(key)
+        payload = runtime.client.get_item_citation_key(key, prefer=prefer.lower())
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     except (BackendConnectionError, IndexNotReadyError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(render_payload(payload, runtime.output))

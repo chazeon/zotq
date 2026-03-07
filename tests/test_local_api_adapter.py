@@ -95,6 +95,46 @@ def test_get_item_returns_none_on_404() -> None:
 
 
 @respx.mock
+def test_get_item_citation_key_rpc_returns_string_result() -> None:
+    respx.post("http://zotero.test/better-bibtex/json-rpc").mock(
+        return_value=Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "zotq",
+                "result": "staceyThermodynamicsGruneisenParameter2019",
+            },
+        )
+    )
+
+    adapter = build_local_adapter()
+    citekey = adapter.get_item_citation_key_rpc("XVMVWQZX")
+
+    assert citekey == "staceyThermodynamicsGruneisenParameter2019"
+
+
+@respx.mock
+def test_get_item_citation_key_rpc_parses_mapping_result() -> None:
+    respx.post("http://zotero.test/better-bibtex/json-rpc").mock(
+        return_value=Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "zotq",
+                "result": {
+                    "0:XVMVWQZX": ["staceyThermodynamicsGruneisenParameter2019"],
+                },
+            },
+        )
+    )
+
+    adapter = build_local_adapter()
+    citekey = adapter.get_item_citation_key_rpc("XVMVWQZX")
+
+    assert citekey == "staceyThermodynamicsGruneisenParameter2019"
+
+
+@respx.mock
 def test_list_collections_and_tags_parse_payloads() -> None:
     respx.get("http://zotero.test/api/users/0/collections").mock(
         return_value=Response(
