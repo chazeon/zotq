@@ -144,6 +144,18 @@ Click CLI
 - Re-embed vectors only when semantic source text changes.
 - Maintain resumable indexing behavior after interruption.
 
+### 5.2.1 Migration Status (Current)
+- Migration is active and intentionally compatibility-preserving (not hard-cutover yet).
+- Completed in code:
+  - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
+  - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
+  - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
+  - `collection export` command path (source-backed pagination + batched BibTeX export).
+- Still transitional:
+  - `documents` remains the canonical raw item-json row during migration.
+  - Legacy normalized columns in `documents` are still dual-written for compatibility.
+  - Final `items`-first canonical metadata cutover remains pending.
+
 ### 5.3 Layered Index Architecture (v2)
 Separate metadata, lexical, and vector concerns:
 
@@ -391,6 +403,8 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - Export should execute against source API pagination, not index ranking, to guarantee complete collection membership export.
 - Collection identity rule:
   - `KEY` is a collection key (stable identifier), not a display name.
+- Implementation status:
+  - Implemented in current v1 surface and covered by tests/docs.
 
 ## 7. Object and Data Models (Pydantic)
 

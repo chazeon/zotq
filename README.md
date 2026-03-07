@@ -178,6 +178,18 @@ Source collection progress (`offset` + collected item keys) is also checkpointed
 - `--field all`: run all enrichers in one pass.
 `index inspect` reports structured-field coverage from the registry-backed store (including DOI, citation key, journal, ISSN, volume, pages, language, and journal abbreviation) with sample item keys.
 
+### Migration Status
+- Current status: in-progress migration (not final cutover yet).
+- Already cut over:
+  - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
+  - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
+  - Split hash incremental sync and resume checkpoints.
+  - `collection export` command surface and source-backed pagination/batching flow.
+- Still compatibility-backed:
+  - `documents` remains the canonical item-json row store during transition.
+  - Legacy normalized columns in `documents` are still maintained for compatibility.
+  - Final `items`-first canonical metadata cutover is not complete yet.
+
 Run semantic search:
 
 ```bash
