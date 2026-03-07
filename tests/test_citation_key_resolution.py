@@ -112,6 +112,21 @@ def test_resolve_citation_key_falls_back_to_bibtex() -> None:
     assert payload["prefer"] == "auto"
 
 
+def test_resolve_citation_key_bibtex_ignores_comment_entries() -> None:
+    source = _SourceStub(
+        item=Item(key="K3C"),
+        bibtex="@comment{notARealKey}\n@article{fromBibtex,\n  title={X},\n}",
+    )
+    client = _build_client(source)
+
+    payload = client.get_item_citation_key("K3C", prefer="bibtex")
+
+    assert payload["found"] is True
+    assert payload["citation_key"] == "fromBibtex"
+    assert payload["source"] == "bibtex"
+    assert payload["prefer"] == "bibtex"
+
+
 def test_resolve_citation_key_falls_back_to_rpc_before_bibtex() -> None:
     source = _SourceStub(item=Item(key="K3"), bibtex="@article{fromBibtex,\n  title={X},\n}", rpc="fromRpc")
     client = _build_client(source)

@@ -9,7 +9,9 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S2` (`done`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
 - [x] `S3` (`done`) Execute P0 benchmark harness (`T0.3`) with tests first.
 - [x] `S4` (`done`) Execute P1 retrieval overhead work (`T1.1`/`T1.2`/`T1.3`) with test coverage.
-- [ ] `S5` (`in_progress`) Start parser-backed BibTeX path (`T2.2`/`T2.3`).
+- [x] `S5` (`done`) Execute `T2.2`: parser-backed citation-key extraction and batch parsing in client.
+- [x] `S6` (`done`) Execute `T2.3`: deterministic BibTeX stringify policy + output integration tests.
+- [ ] `S7` (`in_progress`) Prepare `T3.1`: vector backend abstraction scaffolding + parity test skeleton.
 
 ## P0 Contracts and Benchmarks
 
@@ -45,17 +47,17 @@ Status values: `todo`, `in_progress`, `done`.
   - Files: `pyproject.toml`, `README.md`.
   - Tests: dependency import smoke in `tests/`.
 
-- [ ] `T2.2` (`todo`) Replace regex citation-key extraction with parser-backed functions.
+- [x] `T2.2` (`done`) Replace regex citation-key extraction with parser-backed functions.
   - Files: `src/zotq/client.py`, new parser helper module under `src/zotq/`.
   - Tests: `tests/test_citation_key_resolution.py`.
 
-- [ ] `T2.3` (`todo`) Add deterministic BibTeX stringify policy for offline output.
+- [x] `T2.3` (`done`) Add deterministic BibTeX stringify policy for offline output.
   - Files: parser helper module, `src/zotq/output.py`.
   - Tests: new round-trip BibTeX tests.
 
 ## P3 SQLite-vec Backend
 
-- [ ] `T3.1` (`todo`) Add vector storage backend abstraction and `sqlite-vec` backend.
+- [ ] `T3.1` (`in_progress`) Add vector storage backend abstraction and `sqlite-vec` backend.
   - Files: `src/zotq/storage/vector_index.py`, `src/zotq/models.py`, `src/zotq/config.py`.
   - Tests: backend parity tests in new `tests/test_vector_backend_parity.py`.
 

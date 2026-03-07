@@ -268,6 +268,7 @@ uv run zotq --mode local-api item citekey XVMVWQZX --prefer bibtex
 `--prefer` controls citation-key resolution source:
 - `auto`: try `item.citationKey`, then `extra` (`Citation Key: ...`), then Better BibTeX RPC, then BibTeX parse fallback.
 - `json|extra|rpc|bibtex`: force a single source with no fallback.
+- BibTeX citation-key extraction uses a parser-first path (with compatibility fallback for malformed/minimal BibTeX stubs).
 
 Better BibTeX RPC requires the Better BibTeX plugin in Zotero and uses:
 - `POST http://127.0.0.1:23119/better-bibtex/json-rpc`
@@ -299,6 +300,7 @@ uv run zotq --mode local-api --output bibtex collection export C1 --format bibte
 
 `collection export` is source-backed (not index-backed) and paginates through collection items before batched BibTeX fetches.
 `--output bibtex` is required for this command.
+When multiple BibTeX chunks are rendered together (for example multi-key reads), output is canonicalized with deterministic entry ordering/formatting.
 
 ## Embeddings
 - `local`: deterministic hashing model, no extra dependencies.

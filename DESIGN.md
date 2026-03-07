@@ -394,15 +394,17 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - `--output bibtex`
   - Uses Zotero API `format=bibtex` for LaTeX/BibTeX entries.
   - Does not accept CSL-only flags (`style`, `locale`, `linkwrap`).
+  - List/offline aggregation paths use deterministic BibTeX stringify policy.
 
 ### 6.8 Citation Key Resolution (`item citekey`)
 - `--prefer auto` (default)
   - Resolution order: `citationKey` field -> `extra` parse (`Citation Key: ...`) -> Better BibTeX JSON-RPC -> BibTeX parse.
 - `--prefer json|extra|rpc|bibtex`
   - Restricts lookup to one source only (no fallback chain).
-- BibTeX parse implementation policy (planned):
+- BibTeX parse implementation policy:
   - Replace regex-based BibTeX key extraction with parser-backed extraction from the selected BibTeX library.
   - Single-entry and batched-entry citation-key extraction must share the same parser path.
+  - Current status: parser-first implementation with compatibility fallback for malformed/minimal entries.
 - Better BibTeX RPC endpoint (optional):
   - `POST /better-bibtex/json-rpc`
   - method: `item.citationkey`

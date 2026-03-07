@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 import re
 
+from .bibtex_parser import bibtex_citation_key, bibtex_citation_keys
 from .factory import build_index_service, build_source_adapter
 from .index_service import MockIndexService
 from .models import (
@@ -240,19 +241,11 @@ class ZotQueryClient:
 
     @staticmethod
     def _citation_key_from_bibtex(bibtex: str | None) -> str | None:
-        if not bibtex:
-            return None
-        match = re.search(r"@\w+\s*\{\s*([^,\s]+)\s*,", bibtex)
-        if not match:
-            return None
-        return match.group(1).strip() or None
+        return bibtex_citation_key(bibtex)
 
     @staticmethod
     def _citation_keys_from_bibtex_entries(bibtex: str | None) -> list[str]:
-        if not bibtex:
-            return []
-        values = re.findall(r"@\w+\s*\{\s*([^,\s]+)\s*,", bibtex)
-        return [value.strip() for value in values if value and value.strip()]
+        return bibtex_citation_keys(bibtex)
 
     def _resolve_citation_keys_for_item_keys(
         self,

@@ -13,6 +13,7 @@ class _EnrichmentSourceStub:
         self._rpc = dict(rpc or {})
         self._bibtex = bibtex
         self.rpc_batch_calls = 0
+        self.single_bibtex_calls = 0
 
     def health(self) -> dict[str, str]:
         return {"status": "ok", "adapter": "stub"}
@@ -36,6 +37,7 @@ class _EnrichmentSourceStub:
         return None
 
     def get_item_bibtex(self, key: str) -> str | None:
+        self.single_bibtex_calls += 1
         return None
 
     def get_item_citation_key_rpc(self, key: str) -> str | None:
@@ -108,6 +110,21 @@ def test_index_sync_enriches_citation_key_from_bibtex_batch_fallback() -> None:
     result = client.search(QuerySpec(search_mode=SearchMode.KEYWORD, citation_key="betakey", limit=5))
 
     assert [hit.item.key for hit in result.hits] == ["K2"]
+
+
+def test_index_sync_bibtex_batch_parse_ignores_comment_entries_without_fallback_loop() -> None:
+    source = _EnrichmentSourceStub(
+        items=[Item(key="K1", title="Doc One"), Item(key="K2", title="Doc Two")],
+        rpc={},
+        bibtex="@comment{notAKey}\n@article{alphaKey,\n  title={Doc One}\n}\n\n@article{betaKey,\n  title={Doc Two}\n}\n",
+    )
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+    result = client.search(QuerySpec(search_mode=SearchMode.KEYWORD, citation_key="betakey", limit=5))
+
+    assert [hit.item.key for hit in result.hits] == ["K2"]
+    assert source.single_bibtex_calls == 0
 
 
 def test_index_enrich_doi_updates_missing_doi_in_place() -> None:

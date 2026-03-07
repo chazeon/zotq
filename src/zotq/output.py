@@ -9,6 +9,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
+from .bibtex_parser import canonicalize_bibtex_text, canonicalize_bibtex_texts
 from .models import OutputFormat
 
 
@@ -152,7 +153,7 @@ def _render_table(payload: Any) -> str:
 
 
 def render_payload(payload: Any, output_format: OutputFormat) -> str:
-    if output_format in {OutputFormat.BIB, OutputFormat.BIBTEX}:
+    if output_format == OutputFormat.BIB:
         if isinstance(payload, str):
             return payload
         if isinstance(payload, dict):
@@ -164,6 +165,23 @@ def render_payload(payload: Any, output_format: OutputFormat) -> str:
         if isinstance(payload, list):
             return "\n\n".join(str(item) for item in payload)
         return str(payload)
+
+    if output_format == OutputFormat.BIBTEX:
+        if isinstance(payload, str):
+            canonical = canonicalize_bibtex_text(payload)
+            return canonical or ""
+        if isinstance(payload, dict):
+            bibliography = payload.get("bibliography")
+            if isinstance(bibliography, str):
+                canonical = canonicalize_bibtex_text(bibliography)
+                return canonical or ""
+            if bibliography is None:
+                return ""
+        if isinstance(payload, list):
+            chunks = [str(item) for item in payload if str(item).strip()]
+            return canonicalize_bibtex_texts(chunks)
+        canonical = canonicalize_bibtex_text(str(payload))
+        return canonical or ""
 
     if output_format == OutputFormat.JSON:
         return json.dumps(payload, indent=2, default=_json_default)
