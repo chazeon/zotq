@@ -33,6 +33,7 @@ Tech constraints:
   - `system health`
   - `search run`
   - `item get`
+  - `item citekey`
   - `collection list`
   - `tag list`
   - `index status`
@@ -112,10 +113,16 @@ Click CLI
   - `fuzzy`: `SequenceMatcher` over title + indexed text.
   - `semantic`: vector similarity.
   - `hybrid`: normalized lexical/vector fusion with `alpha`.
+- Query routing:
+  - `--backend auto`: prefer local index when that executed mode is available.
+  - `--backend source`: force source API search path.
+  - `--backend index`: force local index search path.
 - Incremental sync default:
   - `index sync` updates changed items only (content-hash based).
   - `index sync --full` and `index rebuild` force full reprocessing.
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
+- DOI filtering is normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
+- Citation-key filtering is case-insensitive and also uses `extra` fallback parsing (`Citation Key: ...`) when `citationKey` is absent.
 
 ### 5.2 v2 Goals
 - Add fields over time (for example DOI, journal, publisher) without expensive full rebuilds.
@@ -222,15 +229,19 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 
 ### 5.7 Query Pipeline (v2)
 1. Identifier short-circuit:
-   - If `--doi` provided (or DOI pattern detected), resolve through `identifiers` first.
+   - If `--doi` provided, normalized DOI filter is applied.
 2. Structured filtering:
    - Apply `item_type`, date range, creator/tag/field filters from normalized tables.
+   - Implemented filters include `title`, `doi`, `journal`, `citation_key`, `creators`, `tags`, `item_type`, and year bounds.
 3. Retrieval mode execution:
    - `keyword`: FTS5 BM25 with column-aware weighting.
    - `fuzzy`: typo-tolerant lexical matching.
    - `semantic`: vector similarity over chunk embeddings.
    - `hybrid`: normalized lexical + vector score fusion.
-4. Output includes `requested_mode` and `executed_mode`.
+4. Backend routing:
+   - `auto` chooses index when the executed mode is available in index capabilities; otherwise source API.
+   - `source` and `index` are explicit forced routes.
+5. Output includes `requested_mode` and `executed_mode`.
 
 ### 5.8 Author Encoding
 - Store creators in normalized rows (`family`, `given`, `full_norm`, `key_norm`, `ordinal`).
@@ -242,7 +253,8 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - If mode unsupported:
   - `--no-allow-fallback`: return `mode_not_supported` error.
   - `--allow-fallback`: downgrade to `keyword`.
-- Exact identifier lookups bypass fallback logic unless explicit fallback is requested.
+- With `--backend index`, unsupported index modes fail explicitly (or fallback to `keyword` when allowed).
+- With `--backend source`, mode support is evaluated against source capabilities.
 
 ## 6. CLI API Design
 
@@ -250,7 +262,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `-c, --config PATH`
 - `--profile NAME`
 - `--mode [local-api|remote]`
-- `--output [table|json|jsonl]`
+- `--output [table|json|jsonl|bib|bibtex]`
 - `--verbose`
 
 ### 6.2 Command Grammar
@@ -262,6 +274,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq system health`
 - `zotq search run [QUERY] [options]`
 - `zotq item get KEY`
+- `zotq item citekey KEY`
 - `zotq collection list`
 - `zotq tag list`
 - `zotq index status`
@@ -271,7 +284,10 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 ### 6.4 Search Options (`search run`)
 - `QUERY` positional argument (preferred)
 - `--text`
-- `--doi` (planned v2 exact identifier short-circuit)
+- `--backend [auto|source|index]`
+- `--doi`
+- `--journal`
+- `--citation-key`
 - `--search-mode [keyword|fuzzy|semantic|hybrid]`
 - `--allow-fallback/--no-allow-fallback`
 - `--title`
@@ -284,6 +300,9 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `--alpha` (hybrid fusion weight)
 - `--lexical-k`
 - `--vector-k`
+- `--style` (when `--output bib`)
+- `--locale` (when `--output bib`)
+- `--linkwrap/--no-linkwrap` (when `--output bib`)
 - `--debug/--no-debug`
 - `--limit`
 - `--offset`
@@ -312,6 +331,19 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - `zotq tag add`
 - `zotq tag remove`
 
+### 6.7 Bibliography Output
+- `--output bib`
+  - Uses Zotero API `format=bib` (CSL formatted bibliography output; often HTML-like snippets).
+  - Supports `--style`, `--locale`, and `--linkwrap`.
+- `--output bibtex`
+  - Uses Zotero API `format=bibtex` for LaTeX/BibTeX entries.
+  - Does not accept CSL-only flags (`style`, `locale`, `linkwrap`).
+- For search result sets, bibliography and bibtex retrieval are batched via `itemKey=K1,K2,...` where supported.
+- Authentication model:
+  - `local-api`: typically no API key required when local API access is enabled in Zotero Desktop.
+  - `remote`: API key or bearer token required for non-public libraries.
+- `zotq` should treat "zotbib-like" output as Zotero API bibliography formatting support (not dependency on a separate ZoteroBib backend service).
+
 ## 7. Object and Data Models (Pydantic)
 
 ### 7.1 Config Models
@@ -334,9 +366,13 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 ```python
 QuerySpec(
   text: str | None,
+  backend: Literal["auto", "source", "index"],
   search_mode: Literal["keyword", "fuzzy", "semantic", "hybrid"],
   allow_fallback: bool,
   title: str | None,
+  doi: str | None,
+  journal: str | None,
+  citation_key: str | None,
   creators: list[str],
   year_from: int | None,
   year_to: int | None,
@@ -346,6 +382,7 @@ QuerySpec(
   alpha: float | None,
   lexical_k: int | None,
   vector_k: int | None,
+  debug: bool,
   limit: int,
   offset: int,
 )

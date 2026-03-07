@@ -135,6 +135,8 @@ uv run zotq item get ABCD1234
 ```
 
 `--output table` now renders rich terminal tables (search summary/hits and debug sections).
+`--output bib` renders formatted CSL bibliography output from Zotero (`format=bib`, typically HTML-like snippets) and supports `--style`, `--locale`, and `--linkwrap`.
+`--output bibtex` renders BibTeX entries (`format=bibtex`).
 
 ## Search Modes
 - `keyword`: SQLite FTS5 lexical ranking.
@@ -179,6 +181,42 @@ Add `--debug` to include a debug section with candidate limits, per-hit penaltie
 
 ```bash
 uv run zotq --mode local-api --output json search run "mantle hydration" --search-mode hybrid --debug
+```
+
+Field-aware filters:
+
+```bash
+uv run zotq --mode local-api --output json search run \
+  --doi "doi:10.1016/j.pepi.2018.10.006" \
+  --journal "Physics of the Earth and Planetary Interiors" \
+  --citation-key "staceyThermodynamicsGruneisenParameter2019"
+```
+
+Search backend selection:
+
+```bash
+uv run zotq --mode local-api --output json search run "mantle hydration" --backend auto
+uv run zotq --mode local-api --output json search run "mantle hydration" --backend source
+uv run zotq --mode local-api --output json search run "mantle hydration" --backend index
+```
+
+Notes:
+- DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
+- Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
+
+Resolve citation key:
+
+```bash
+uv run zotq --mode local-api item citekey XVMVWQZX
+```
+
+Bibliography output:
+
+```bash
+uv run zotq --mode local-api --output bib item get XVMVWQZX --style apa --locale en-US --linkwrap
+uv run zotq --mode local-api --output bib search run "mantle hydration" --limit 5 --style apa
+uv run zotq --mode local-api --output bibtex item get XVMVWQZX
+uv run zotq --mode local-api --output bibtex search run "mantle hydration" --limit 5
 ```
 
 ## Embeddings

@@ -26,11 +26,19 @@ Before implementing behavior-heavy features:
 - `zotq system health`
 - `zotq search run [QUERY] [options]`
 - `zotq item get KEY`
+- `zotq item citekey KEY`
 - `zotq collection list`
 - `zotq tag list`
 - `zotq index status`
 - `zotq index sync [--full]`
 - `zotq index rebuild`
+
+## Search/Output Contract Notes
+- `search run` supports `--backend [auto|source|index]`; preserve deterministic routing semantics.
+- `--output bib` means Zotero `format=bib` (CSL formatted output, often HTML-like).
+- `--output bibtex` means Zotero `format=bibtex` (LaTeX BibTeX entries).
+- DOI matching must stay normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
+- Citation-key search must remain case-insensitive and support `extra` fallback parsing (`Citation Key: ...`).
 
 ## Reserved Verb Space (Post-v1)
 Keep names reserved now; do not repurpose:
