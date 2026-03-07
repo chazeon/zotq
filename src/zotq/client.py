@@ -627,8 +627,35 @@ class ZotQueryClient:
                 break
         return items
 
-    def index_sync(self, *, full: bool = False, progress: ProgressCallback | None = None):
-        items = self._collect_all_items(progress=progress, checkpoint_scope="sync", full=full)
+    def _collect_profile_mismatch_items(self, *, progress: ProgressCallback | None = None) -> list[Item]:
+        list_mismatch = getattr(self._index, "list_profile_mismatch_item_keys", None)
+        if not callable(list_mismatch):
+            return self._collect_all_items(progress=progress, checkpoint_scope="sync", full=False)
+
+        keys = [str(key).strip() for key in list_mismatch() if str(key).strip()]
+        total = len(keys)
+        items: list[Item] = []
+        for index, key in enumerate(keys, start=1):
+            item = self._source.get_item(key)
+            if item is not None:
+                items.append(item)
+            if progress is not None:
+                progress("collect", index, total)
+        return items
+
+    def index_sync(
+        self,
+        *,
+        full: bool = False,
+        profiles_only: bool = False,
+        progress: ProgressCallback | None = None,
+    ):
+        if full and profiles_only:
+            raise ValueError("--profiles-only cannot be combined with --full.")
+        if profiles_only:
+            items = self._collect_profile_mismatch_items(progress=progress)
+        else:
+            items = self._collect_all_items(progress=progress, checkpoint_scope="sync", full=full)
         status = self._index.sync(items=items, full=full, progress=progress)
         self.index_enrich_citation_keys(progress=progress)
         clear_collect = getattr(self._index, "clear_collect_checkpoint", None)

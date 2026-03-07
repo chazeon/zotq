@@ -129,6 +129,7 @@ Click CLI
     - lexical hash for metadata/FTS updates.
     - vector hash for semantic embedding refresh.
     - lexical/vector profile versions can force targeted reprocessing when mappings/chunk policy changes.
+  - `index sync --profiles-only` reprocesses only items with lexical/vector profile-version mismatches.
   - Source collection checkpoints (`scope`, `full`, `next_offset`, `collected_keys`) enable resume before ingest.
   - Per-item ingest checkpoints (`mode`, `done`, `total`, `remaining_keys`) enable interruption-safe resume on next `index sync`.
   - `index sync --full` and `index rebuild` force full reprocessing.
@@ -151,6 +152,7 @@ Click CLI
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
+  - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
 - Still transitional:
   - `documents` remains the canonical raw item-json row during migration.
@@ -308,7 +310,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq tag list`
 - `zotq index status`
 - `zotq index inspect`
-- `zotq index sync [--full]`
+- `zotq index sync [--full] [--profiles-only]`
 - `zotq index rebuild`
 - `zotq index enrich [--field citation-key|doi|journal|all]`
 
@@ -347,6 +349,9 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
   - Reports lexical/vector profile-version mismatch counts and sample mismatched item keys against configured targets.
 - `index sync`
   - Incremental update from source checkpoints (lexical + vector).
+- `index sync --profiles-only`
+  - Reprocesses only items with lexical/vector profile-version mismatches.
+  - Cannot be combined with `--full`.
 - `index sync --full`
   - Full rescan + reindex.
 - `index rebuild`
@@ -659,7 +664,7 @@ src/zotq/
 2. Add projection/version migration controls:
    - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
    - Reporting for version mismatch counts is now available via `index inspect`.
-   - Provide an explicit migration command/workflow for version mismatch remediation.
+   - Explicit migration workflow is available via `index sync --profiles-only`.
 3. Improve source checkpointing fidelity:
    - Add source watermark/checkpoint support beyond offset paging where adapters can provide it.
    - Ensure restart logic handles source-order drift safely.

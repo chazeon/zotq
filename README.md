@@ -156,6 +156,7 @@ Build or refresh index from the active backend:
 ```bash
 uv run zotq --mode local-api index sync
 uv run zotq --mode local-api index sync --full
+uv run zotq --mode local-api index sync --profiles-only
 uv run zotq --mode local-api index rebuild
 uv run zotq --mode local-api index enrich
 uv run zotq --mode local-api index enrich --field all
@@ -169,6 +170,8 @@ Use `--no-progress` to disable it.
 - lexical hash controls document/FTS refresh.
 - vector hash controls chunk re-embedding.
 - metadata-only changes (for example DOI/journal/citation key) update lexical metadata without forcing vector re-embedding.
+`index sync --profiles-only` is an explicit migration/remediation pass that fetches and reprocesses only items whose stored lexical/vector profile versions mismatch current config targets.
+It cannot be combined with `--full`.
 Interrupted syncs now persist per-item ingest checkpoints and resume on the next run (including `--full`) without restarting from item zero.
 Source collection progress (`offset` + collected item keys) is also checkpointed, so retries can resume collection before ingest.
 `index sync --full` clears and rebuilds lexical/vector indexes from scratch.
@@ -186,6 +189,7 @@ It also reports lexical/vector profile-version mismatch counts and sample mismat
   - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
   - Split hash incremental sync and resume checkpoints.
   - `index inspect` profile-version mismatch reporting.
+  - Explicit profile mismatch remediation via `index sync --profiles-only`.
   - `collection export` command surface and source-backed pagination/batching flow.
 - Still compatibility-backed:
   - `documents` remains the canonical item-json row store during transition.

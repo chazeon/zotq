@@ -405,6 +405,17 @@ class MockIndexService:
     def list_items_missing_field(self, field: str) -> list[str]:
         return self._lexical.list_item_keys_missing_field(field)
 
+    def list_profile_mismatch_item_keys(self) -> list[str]:
+        lexical = self._lexical.list_item_keys_with_profile_mismatch(
+            "lexical_profile_version",
+            self._config.lexical_profile_version,
+        )
+        vector = self._lexical.list_item_keys_with_profile_mismatch(
+            "vector_profile_version",
+            self._config.vector_profile_version,
+        )
+        return sorted(set(lexical) | set(vector))
+
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
         return self._lexical.set_item_citation_key(item_key, citation_key)
 

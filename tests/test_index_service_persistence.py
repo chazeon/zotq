@@ -295,3 +295,33 @@ def test_index_inspect_reports_profile_version_mismatches(tmp_path: Path) -> Non
         assert profiles["vector"]["sample_mismatched_item_keys"] == ["K1"]
     finally:
         bumped.close()
+
+
+def test_index_service_lists_profile_mismatch_item_keys(tmp_path: Path) -> None:
+    base_cfg = IndexConfig(
+        index_dir=str(tmp_path / "index"),
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=1,
+        vector_profile_version=1,
+    )
+    service = MockIndexService(base_cfg)
+    try:
+        service.sync(full=True, items=[Item(key="K1", title="One"), Item(key="K2", title="Two")])
+    finally:
+        service.close()
+
+    bumped_cfg = IndexConfig(
+        index_dir=base_cfg.index_dir,
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=2,
+        vector_profile_version=3,
+    )
+    bumped = MockIndexService(bumped_cfg)
+    try:
+        assert bumped.list_profile_mismatch_item_keys() == ["K1", "K2"]
+    finally:
+        bumped.close()

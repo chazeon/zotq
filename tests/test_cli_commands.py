@@ -675,6 +675,14 @@ def test_index_sync_json_output_ignores_progress_rendering() -> None:
     assert payload["status"]["ready"] is True
 
 
+def test_index_sync_rejects_profiles_only_with_full() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "index", "sync", "--full", "--profiles-only"])
+
+    assert result.exit_code != 0
+    assert "--profiles-only cannot be combined with --full" in result.output
+
+
 def test_index_enrich_returns_counts_when_index_empty() -> None:
     runner = CliRunner()
     result = invoke_remote(runner, ["--output", "json", "index", "enrich", "--no-progress"])

@@ -449,18 +449,30 @@ def index_inspect(runtime: RuntimeContext, sample_limit: int) -> None:
 
 @index_group.command("sync")
 @click.option("full", "--full", is_flag=True, default=False)
+@click.option(
+    "profiles_only",
+    "--profiles-only/--no-profiles-only",
+    default=False,
+    help="Sync only items with lexical/vector profile-version mismatches.",
+)
 @click.option("show_progress", "--progress/--no-progress", default=True, help="Show progress in table output.")
 @pass_runtime
-def index_sync(runtime: RuntimeContext, full: bool, show_progress: bool) -> None:
+def index_sync(runtime: RuntimeContext, full: bool, profiles_only: bool, show_progress: bool) -> None:
+    if full and profiles_only:
+        raise click.ClickException("--profiles-only cannot be combined with --full.")
     try:
         if show_progress:
-            status_obj = _run_with_index_progress(runtime, "sync", lambda progress: runtime.client.index_sync(full=full, progress=progress))
+            status_obj = _run_with_index_progress(
+                runtime,
+                "sync",
+                lambda progress: runtime.client.index_sync(full=full, profiles_only=profiles_only, progress=progress),
+            )
         else:
-            status_obj = runtime.client.index_sync(full=full)
+            status_obj = runtime.client.index_sync(full=full, profiles_only=profiles_only)
         status = status_obj.model_dump(mode="json")
-    except BackendConnectionError as exc:
+    except (BackendConnectionError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"action": "sync", "full": full, "status": status}
+    payload = {"action": "sync", "full": full, "profiles_only": profiles_only, "status": status}
     click.echo(render_payload(payload, runtime.output))
 
 

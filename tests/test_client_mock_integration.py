@@ -8,7 +8,7 @@ from zotq.client import ZotQueryClient
 from zotq.errors import ModeNotSupportedError
 from zotq.index_service import MockIndexService
 from zotq.models import AppConfig, Item, QuerySpec, SearchMode
-from zotq.sources.mock import MockSourceAdapter
+from zotq.sources.mock import MOCK_ITEMS, MockSourceAdapter
 
 
 def build_client(*, semantic_enabled: bool = True) -> ZotQueryClient:
@@ -177,3 +177,58 @@ def test_index_sync_collect_resumes_after_collection_interruption() -> None:
 
     payload = index._checkpoints.read()  # type: ignore[attr-defined]
     assert "collect" not in payload
+
+
+def test_index_sync_profiles_only_reindexes_profile_mismatches_without_paging_source() -> None:
+    class _CountingSource(MockSourceAdapter):
+        def __init__(self) -> None:
+            super().__init__(semantic_enabled=True)
+            self.list_items_calls = 0
+            self.get_item_calls: list[str] = []
+
+        def list_items(self, *, limit: int = 100, offset: int = 0) -> list[Item]:
+            self.list_items_calls += 1
+            return super().list_items(limit=limit, offset=offset)
+
+        def get_item(self, key: str) -> Item | None:
+            self.get_item_calls.append(key)
+            return super().get_item(key)
+
+    base_config = AppConfig()
+    base_profile = base_config.profiles["default"]
+    base_profile.index.index_dir = tempfile.mkdtemp(prefix="zotq-test-profile-migrate-index-")
+    base_profile.index.lexical_profile_version = 1
+    base_profile.index.vector_profile_version = 1
+
+    initial_source = _CountingSource()
+    initial_index = MockIndexService(base_profile.index)
+    initial_client = ZotQueryClient(
+        config=base_config,
+        profile_name="default",
+        source_adapter=initial_source,
+        index_service=initial_index,
+    )
+    initial_client.index_sync(full=True)
+
+    migrated_config = AppConfig.model_validate(base_config.model_dump(mode="python"))
+    migrated_profile = migrated_config.profiles["default"]
+    migrated_profile.index.lexical_profile_version = 2
+    migrated_profile.index.vector_profile_version = 1
+
+    migrated_source = _CountingSource()
+    migrated_index = MockIndexService(migrated_profile.index)
+    migrated_client = ZotQueryClient(
+        config=migrated_config,
+        profile_name="default",
+        source_adapter=migrated_source,
+        index_service=migrated_index,
+    )
+
+    status = migrated_client.index_sync(full=False, profiles_only=True)
+    inspect = migrated_client.index_inspect(sample_limit=5)
+
+    assert status.ready is True
+    assert migrated_source.list_items_calls == 0
+    expected_keys = {item.key for item in MOCK_ITEMS}
+    assert expected_keys.issubset(set(migrated_source.get_item_calls))
+    assert inspect["profiles"]["lexical"]["mismatched"] == 0
