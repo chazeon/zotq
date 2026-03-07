@@ -292,6 +292,21 @@ def test_upsert_dual_writes_canonical_items_row(tmp_path: Path) -> None:
         index.close()
 
 
+def test_upsert_does_not_dual_write_documents_row(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(key="NO-DOC-DUAL", item_type="journalArticle", title="Canonical only")
+        _upsert(index, item, "canonical only body")
+
+        row = index._conn.execute(  # type: ignore[attr-defined]
+            "SELECT COUNT(*) AS c FROM documents WHERE item_key = 'NO-DOC-DUAL'"
+        ).fetchone()
+        assert row is not None
+        assert int(row["c"]) == 0
+    finally:
+        index.close()
+
+
 def test_legacy_schema_migration_backfills_items_table(tmp_path: Path) -> None:
     db_path = tmp_path / "lexical.sqlite3"
     conn = sqlite3.connect(str(db_path))
@@ -376,6 +391,34 @@ def test_get_item_reads_from_items_table_when_documents_row_missing(tmp_path: Pa
         assert loaded.key == "ITEMS-READ"
         assert loaded.title == "Read from items"
         assert loaded.doi == "10.1000/read-items"
+    finally:
+        index.close()
+
+
+def test_sync_state_reads_from_items_when_documents_row_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(key="SYNC-ITEMS", item_type="journalArticle", title="Sync state")
+        index.upsert_item(
+            item=item,
+            chunks=_chunks(item.key, "sync text"),
+            full_text="sync text",
+            content_hash="content-sync",
+            lexical_hash="lex-sync",
+            vector_hash="vec-sync",
+            lexical_profile_version=2,
+            vector_profile_version=4,
+        )
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key = 'SYNC-ITEMS'")  # type: ignore[attr-defined]
+
+        lexical_hash, vector_hash, content_hash, lexical_version, vector_version = index.get_item_sync_state("SYNC-ITEMS")
+
+        assert lexical_hash == "lex-sync"
+        assert vector_hash == "vec-sync"
+        assert content_hash == "content-sync"
+        assert lexical_version == 2
+        assert vector_version == 4
     finally:
         index.close()
 
