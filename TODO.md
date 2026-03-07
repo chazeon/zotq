@@ -11,7 +11,8 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S4` (`done`) Execute P1 retrieval overhead work (`T1.1`/`T1.2`/`T1.3`) with test coverage.
 - [x] `S5` (`done`) Execute `T2.2`: parser-backed citation-key extraction and batch parsing in client.
 - [x] `S6` (`done`) Execute `T2.3`: deterministic BibTeX stringify policy + output integration tests.
-- [ ] `S7` (`in_progress`) Prepare `T3.1`: vector backend abstraction scaffolding + parity test skeleton.
+- [x] `S7` (`done`) Execute `T3.1`: vector backend abstraction (`python|sqlite-vec`) + parity tests.
+- [ ] `S8` (`in_progress`) Start `T3.2`: migration/backfill path for sqlite-vec cutover.
 
 ## P0 Contracts and Benchmarks
 
@@ -57,11 +58,11 @@ Status values: `todo`, `in_progress`, `done`.
 
 ## P3 SQLite-vec Backend
 
-- [ ] `T3.1` (`in_progress`) Add vector storage backend abstraction and `sqlite-vec` backend.
+- [x] `T3.1` (`done`) Add vector storage backend abstraction and `sqlite-vec` backend.
   - Files: `src/zotq/storage/vector_index.py`, `src/zotq/models.py`, `src/zotq/config.py`.
   - Tests: backend parity tests in new `tests/test_vector_backend_parity.py`.
 
-- [ ] `T3.2` (`todo`) Add migration/backfill path from legacy vector rows to `sqlite-vec`.
+- [ ] `T3.2` (`in_progress`) Add migration/backfill path from legacy vector rows to `sqlite-vec`.
   - Files: `src/zotq/storage/vector_index.py`, `src/zotq/index_service.py`.
   - Tests: `tests/test_vector_migration.py`.
 
