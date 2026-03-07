@@ -153,14 +153,8 @@ class LexicalIndex:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_doi_norm ON items(doi_norm)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_lexical_profile_version ON items(lexical_profile_version)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_vector_profile_version ON items(vector_profile_version)")
-        self._migrate_legacy_documents_table()
-
-    def _table_exists(self, table_name: str) -> bool:
-        row = self._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (table_name,),
-        ).fetchone()
-        return row is not None
+            # Legacy documents-table compatibility window is closed.
+            self._conn.execute("DROP TABLE IF EXISTS documents")
 
     @staticmethod
     def _field_value_hash(raw_value: str, normalized_value: str) -> str:
@@ -396,87 +390,6 @@ class LexicalIndex:
             return ""
         return "\n".join(str(row["text"] or "") for row in rows).strip()
 
-    def _migrate_legacy_documents_table(self) -> None:
-        if not self._table_exists("documents"):
-            return
-
-        rows = self._conn.execute("SELECT * FROM documents ORDER BY item_key").fetchall()
-        if not rows:
-            with self._conn:
-                self._conn.execute("DROP TABLE IF EXISTS documents")
-            return
-
-        with self._conn:
-            for row in rows:
-                row_keys = set(row.keys())
-                raw_json = str(row["item_json"] or "{}") if "item_json" in row_keys else "{}"
-                try:
-                    item = Item.model_validate_json(raw_json)
-                except Exception:
-                    item = None
-                item_key = str(row["item_key"]) if "item_key" in row_keys else (item.key if item is not None else "")
-                if not item_key:
-                    continue
-
-                self._conn.execute(
-                    """
-                    INSERT INTO items(
-                        item_key, item_type, title, date, doi_norm, raw_json,
-                        lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(item_key) DO UPDATE SET
-                        item_type=excluded.item_type,
-                        title=excluded.title,
-                        date=excluded.date,
-                        doi_norm=excluded.doi_norm,
-                        raw_json=excluded.raw_json,
-                        lexical_hash=excluded.lexical_hash,
-                        vector_hash=excluded.vector_hash,
-                        content_hash=excluded.content_hash,
-                        lexical_profile_version=excluded.lexical_profile_version,
-                        vector_profile_version=excluded.vector_profile_version,
-                        updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (
-                        item_key,
-                        row["item_type"] if "item_type" in row_keys else (item.item_type if item is not None else None),
-                        row["title"] if "title" in row_keys else (item.title if item is not None else None),
-                        row["date"] if "date" in row_keys else (item.date if item is not None else None),
-                        (
-                            row["doi_norm"]
-                            if "doi_norm" in row_keys
-                            else self._normalize_doi(item.doi if item is not None else None)
-                        ),
-                        raw_json,
-                        row["lexical_hash"] if "lexical_hash" in row_keys else None,
-                        row["vector_hash"] if "vector_hash" in row_keys else None,
-                        row["content_hash"] if "content_hash" in row_keys else None,
-                        row["lexical_profile_version"] if "lexical_profile_version" in row_keys else None,
-                        row["vector_profile_version"] if "vector_profile_version" in row_keys else None,
-                    ),
-                )
-
-                if "full_text" in row_keys:
-                    full_text = str(row["full_text"] or "").strip()
-                    if full_text:
-                        existing_chunks = self._conn.execute(
-                            "SELECT COUNT(*) AS c FROM chunks WHERE item_key = ?",
-                            (item_key,),
-                        ).fetchone()
-                        if existing_chunks is not None and int(existing_chunks["c"]) == 0:
-                            chunk_id = f"{item_key}:legacy:0"
-                            self._conn.execute(
-                                "INSERT OR REPLACE INTO chunks(chunk_id, item_key, ordinal, text) VALUES (?, ?, ?, ?)",
-                                (chunk_id, item_key, 0, full_text),
-                            )
-                            self._conn.execute(
-                                "INSERT OR REPLACE INTO chunks_fts(chunk_id, item_key, text) VALUES (?, ?, ?)",
-                                (chunk_id, item_key, full_text),
-                            )
-
-            self._conn.execute("DROP TABLE IF EXISTS documents")
-
     @staticmethod
     def _creators_blob(item: Item) -> str:
         return "; ".join(
@@ -560,8 +473,6 @@ class LexicalIndex:
             self._conn.execute("DELETE FROM item_creators")
             self._conn.execute("DELETE FROM identifiers")
             self._conn.execute("DELETE FROM item_fields")
-            if self._table_exists("documents"):
-                self._conn.execute("DELETE FROM documents")
             self._conn.execute("DELETE FROM items")
 
     def document_count(self) -> int:

@@ -184,19 +184,20 @@ When an adapter exposes watermark/cursor paging, `zotq` uses that checkpoint pat
 It also reports lexical/vector profile-version mismatch counts and sample mismatched item keys against the configured `lexical_profile_version` and `vector_profile_version` targets.
 
 ### Migration Status
-- Current status: in-progress migration (not final cutover yet).
+- Current status: migration cutover complete; runtime is `items`-only.
 - Already cut over:
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
-  - Transitional canonical `items` table (backfilled from legacy `documents`) used for canonical ingest, item reads, and sync/profile hash state.
+  - Canonical `items` table used for ingest, item reads, and sync/profile hash state.
   - Safe query-path cutover to `items` for index search/filter execution (`keyword`, `fuzzy`, filter-only, structured prefilter lookup).
-  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are migrated and dropped on open when present.
+  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are dropped on open when present.
   - Split hash incremental sync and resume checkpoints.
   - `index inspect` profile-version mismatch reporting.
   - Explicit profile mismatch remediation via `index sync --profiles-only`.
   - `collection export` command surface and source-backed pagination/batching flow.
-- Still compatibility-backed:
-  - Legacy document-schema migration importer remains for old index files.
+- Compatibility note:
+  - Legacy document-schema importer is retired.
+  - Pre-cutover index files that only contain legacy `documents` rows must be rebuilt (`zotq index rebuild`).
 
 Run semantic search:
 

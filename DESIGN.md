@@ -108,10 +108,9 @@ Click CLI
 ## 5. Search and Index Design
 
 ### 5.1 Current v1 Behavior
-- Local lexical index: SQLite + FTS5 with field-aware projection (`lexical_docs`, `lexical_fts`) plus compatibility chunk tables (`chunks`, `chunks_fts`).
-- Structured metadata dual-write during migration:
-  - Legacy normalized columns in `documents` (`doi_norm`, `citation_key_norm`, `journal_norm`).
-  - Normalized tables for field/identifier lookups (`item_fields`, `identifiers`) with indexed SQL filtering.
+- Local lexical index: SQLite + FTS5 with field-aware projection (`lexical_docs`, `lexical_fts`) plus chunk tables (`chunks`, `chunks_fts`).
+- Structured metadata is stored in normalized lookup tables:
+  - Field/identifier lookups (`item_fields`, `identifiers`) with indexed SQL filtering.
   - Registry-driven fields currently include `doi`, `citation_key`, `journal`, `journal_abbreviation`, `issn`, `volume`, `pages`, `language`.
   - Creator rows are stored in `item_creators` for normalized author metadata.
 - Local vector index: SQLite table of chunk embeddings.
@@ -147,20 +146,21 @@ Click CLI
 - Maintain resumable indexing behavior after interruption.
 
 ### 5.2.1 Migration Status (Current)
-- Migration is active and intentionally compatibility-preserving (not hard-cutover yet).
+- Migration cutover is complete; runtime is `items`-only.
 - Completed in code:
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
-  - Transitional `items` canonical table with backfill from `documents`; canonical ingest/read/hash/profile paths now use `items`.
+  - `items` canonical table for ingest/read/hash/profile paths.
   - Safe query-path cutover to `items` for index search/filter execution (`keyword`, `fuzzy`, filter-only, structured prefilter key lookup).
-  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are migrated and dropped on open when detected.
+  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are dropped on open when detected.
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
   - Optional watermark/cursor collect checkpoint flow (`paging_mode=watermark`) for adapters that provide paging tokens.
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
-- Still transitional:
-  - Legacy document-schema migration importer remains for backward compatibility with old index files.
+- Compatibility note:
+  - Legacy document-schema importer has been retired.
+  - Pre-cutover index files that only contain legacy `documents` rows must be rebuilt (`zotq index rebuild`).
 
 ### 5.3 Layered Index Architecture (v2)
 Separate metadata, lexical, and vector concerns:
@@ -661,9 +661,9 @@ src/zotq/
 - No live Zotero DB reads are required.
 
 ## 17. Next Milestones (Unfinished)
-1. Complete v2 schema split:
-   - Canonical metadata and safe query paths are now `items`-first.
-   - Retire legacy document-schema importer after migration validation window.
+1. Improve migration UX for pre-cutover index files:
+   - Detect legacy-only index files early and emit explicit rebuild guidance.
+   - Surface actionable status text in `index status`/`index inspect`.
 2. Add projection/version migration controls:
    - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
    - Reporting for version mismatch counts is now available via `index inspect`.
