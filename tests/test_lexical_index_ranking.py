@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from pathlib import Path
 import sqlite3
 
@@ -245,6 +244,138 @@ def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Pat
             )
         )
         assert [hit.item.key for hit in hits] == ["LEGACY"]
+    finally:
+        index.close()
+
+
+def test_upsert_dual_writes_canonical_items_row(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="ITEMS-DUAL",
+            item_type="journalArticle",
+            title="Canonical row",
+            date="2024-01-15",
+            doi="10.1000/items-dual",
+        )
+        index.upsert_item(
+            item=item,
+            chunks=_chunks(item.key, "canonical body"),
+            full_text="canonical body",
+            content_hash="content-hash",
+            lexical_hash="lexical-hash",
+            vector_hash="vector-hash",
+            lexical_profile_version=2,
+            vector_profile_version=3,
+        )
+
+        row = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT item_key, item_type, title, date, raw_json, doi_norm, lexical_hash, vector_hash, content_hash,
+                   lexical_profile_version, vector_profile_version
+            FROM items
+            WHERE item_key = 'ITEMS-DUAL'
+            """
+        ).fetchone()
+        assert row is not None
+        assert str(row["item_key"]) == "ITEMS-DUAL"
+        assert str(row["item_type"]) == "journalArticle"
+        assert str(row["title"]) == "Canonical row"
+        assert str(row["date"]) == "2024-01-15"
+        assert str(row["doi_norm"]) == "10.1000/items-dual"
+        assert str(row["lexical_hash"]) == "lexical-hash"
+        assert str(row["vector_hash"]) == "vector-hash"
+        assert str(row["content_hash"]) == "content-hash"
+        assert int(row["lexical_profile_version"]) == 2
+        assert int(row["vector_profile_version"]) == 3
+    finally:
+        index.close()
+
+
+def test_legacy_schema_migration_backfills_items_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "lexical.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE documents (
+                item_key TEXT PRIMARY KEY,
+                item_json TEXT NOT NULL,
+                title TEXT,
+                item_type TEXT,
+                date TEXT,
+                creators TEXT,
+                tags TEXT,
+                full_text TEXT
+            );
+            CREATE TABLE chunks (
+                chunk_id TEXT PRIMARY KEY,
+                item_key TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                text TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                chunk_id UNINDEXED,
+                item_key UNINDEXED,
+                text,
+                tokenize='unicode61'
+            );
+            """
+        )
+        item = Item(
+            key="ITEMS-BACKFILL",
+            item_type="journalArticle",
+            title="Backfilled canonical",
+            date="2019",
+            doi="10.1000/backfill",
+        )
+        conn.execute(
+            """
+            INSERT INTO documents(item_key, item_json, title, item_type, date, creators, tags, full_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (item.key, item.model_dump_json(), item.title, item.item_type, item.date, "", "", "legacy body"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    index = LexicalIndex(db_path)
+    try:
+        row = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT item_key, title, item_type, date
+            FROM items
+            WHERE item_key = 'ITEMS-BACKFILL'
+            """
+        ).fetchone()
+        assert row is not None
+        assert str(row["title"]) == "Backfilled canonical"
+        assert str(row["item_type"]) == "journalArticle"
+        assert str(row["date"]) == "2019"
+    finally:
+        index.close()
+
+
+def test_get_item_reads_from_items_table_when_documents_row_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="ITEMS-READ",
+            item_type="journalArticle",
+            title="Read from items",
+            doi="10.1000/read-items",
+        )
+        _upsert(index, item, "read body")
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key = 'ITEMS-READ'")  # type: ignore[attr-defined]
+
+        loaded = index.get_item("ITEMS-READ")
+
+        assert loaded is not None
+        assert loaded.key == "ITEMS-READ"
+        assert loaded.title == "Read from items"
+        assert loaded.doi == "10.1000/read-items"
     finally:
         index.close()
 

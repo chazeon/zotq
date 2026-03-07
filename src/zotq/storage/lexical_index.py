@@ -71,6 +71,21 @@ class LexicalIndex:
                 journal_norm TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS items (
+                item_key TEXT PRIMARY KEY,
+                item_type TEXT,
+                title TEXT,
+                date TEXT,
+                doi_norm TEXT,
+                raw_json TEXT NOT NULL,
+                lexical_hash TEXT,
+                vector_hash TEXT,
+                content_hash TEXT,
+                lexical_profile_version INTEGER,
+                vector_profile_version INTEGER,
+                updated_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS chunks (
                 chunk_id TEXT PRIMARY KEY,
                 item_key TEXT NOT NULL,
@@ -136,6 +151,7 @@ class LexicalIndex:
             """
         )
         self._ensure_documents_columns()
+        self._ensure_items_table()
         self._ensure_structured_tables()
 
     def _ensure_documents_columns(self) -> None:
@@ -186,6 +202,13 @@ class LexicalIndex:
         self._backfill_structured_tables()
         self._backfill_creator_rows()
         self._backfill_lexical_projection()
+
+    def _ensure_items_table(self) -> None:
+        with self._conn:
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_doi_norm ON items(doi_norm)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_lexical_profile_version ON items(lexical_profile_version)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_vector_profile_version ON items(vector_profile_version)")
+        self._backfill_items_table()
 
     @staticmethod
     def _field_value_hash(raw_value: str, normalized_value: str) -> str:
@@ -407,6 +430,58 @@ class LexicalIndex:
             full_text = str(row["full_text"] or "")
             self._upsert_lexical_projection(item, full_text=full_text)
 
+    def _backfill_items_table(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT d.item_key, d.item_json, d.item_type, d.title, d.date, d.doi_norm, d.lexical_hash, d.vector_hash,
+                   d.content_hash, d.lexical_profile_version, d.vector_profile_version
+            FROM documents d
+            LEFT JOIN items i
+              ON i.item_key = d.item_key
+            WHERE i.item_key IS NULL
+            ORDER BY d.item_key
+            """
+        ).fetchall()
+        if not rows:
+            return
+
+        with self._conn:
+            for row in rows:
+                self._conn.execute(
+                    """
+                    INSERT INTO items(
+                        item_key, item_type, title, date, doi_norm, raw_json,
+                        lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(item_key) DO UPDATE SET
+                        item_type=excluded.item_type,
+                        title=excluded.title,
+                        date=excluded.date,
+                        doi_norm=excluded.doi_norm,
+                        raw_json=excluded.raw_json,
+                        lexical_hash=excluded.lexical_hash,
+                        vector_hash=excluded.vector_hash,
+                        content_hash=excluded.content_hash,
+                        lexical_profile_version=excluded.lexical_profile_version,
+                        vector_profile_version=excluded.vector_profile_version,
+                        updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (
+                        str(row["item_key"]),
+                        row["item_type"],
+                        row["title"],
+                        row["date"],
+                        row["doi_norm"],
+                        str(row["item_json"] or "{}"),
+                        row["lexical_hash"],
+                        row["vector_hash"],
+                        row["content_hash"],
+                        row["lexical_profile_version"],
+                        row["vector_profile_version"],
+                    ),
+                )
+
     def _backfill_normalized_columns(self) -> None:
         rows = self._conn.execute(
             """
@@ -479,6 +554,40 @@ class LexicalIndex:
         with self._conn:
             self._conn.execute(
                 """
+                INSERT INTO items(
+                    item_key, item_type, title, date, doi_norm, raw_json,
+                    lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(item_key) DO UPDATE SET
+                    item_type=excluded.item_type,
+                    title=excluded.title,
+                    date=excluded.date,
+                    doi_norm=excluded.doi_norm,
+                    raw_json=excluded.raw_json,
+                    lexical_hash=excluded.lexical_hash,
+                    vector_hash=excluded.vector_hash,
+                    content_hash=excluded.content_hash,
+                    lexical_profile_version=excluded.lexical_profile_version,
+                    vector_profile_version=excluded.vector_profile_version,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    item.key,
+                    item.item_type,
+                    item.title,
+                    item.date,
+                    doi_norm,
+                    item_json,
+                    lexical_hash,
+                    vector_hash,
+                    content_hash,
+                    lexical_profile_version,
+                    vector_profile_version,
+                ),
+            )
+            self._conn.execute(
+                """
                 INSERT INTO documents(
                     item_key, item_json, title, item_type, date, creators, tags, full_text,
                     content_hash, lexical_hash, vector_hash, lexical_profile_version, vector_profile_version,
@@ -548,9 +657,10 @@ class LexicalIndex:
             self._conn.execute("DELETE FROM identifiers")
             self._conn.execute("DELETE FROM item_fields")
             self._conn.execute("DELETE FROM documents")
+            self._conn.execute("DELETE FROM items")
 
     def document_count(self) -> int:
-        row = self._conn.execute("SELECT COUNT(*) AS c FROM documents").fetchone()
+        row = self._conn.execute("SELECT COUNT(*) AS c FROM items").fetchone()
         return int(row["c"]) if row else 0
 
     def chunk_count(self) -> int:
@@ -558,10 +668,13 @@ class LexicalIndex:
         return int(row["c"]) if row else 0
 
     def get_item(self, item_key: str) -> Item | None:
-        row = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
-        if row is None:
+        row = self._conn.execute("SELECT raw_json FROM items WHERE item_key = ?", (item_key,)).fetchone()
+        if row is not None:
+            return Item.model_validate_json(row["raw_json"])
+        fallback = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
+        if fallback is None:
             return None
-        return Item.model_validate_json(row["item_json"])
+        return Item.model_validate_json(fallback["item_json"])
 
     def list_item_keys_missing_citation_key(self) -> list[str]:
         return self.list_item_keys_missing_field("citation_key")
@@ -576,14 +689,14 @@ class LexicalIndex:
     def list_item_keys_missing_field(self, field: str, *, limit: int | None = None) -> list[str]:
         field_name = self._normalize_field_name(field)
         sql = """
-            SELECT d.item_key
-            FROM documents d
+            SELECT i.item_key
+            FROM items i
             LEFT JOIN item_fields f
-              ON f.item_key = d.item_key
+              ON f.item_key = i.item_key
              AND f.field_name = ?
              AND f.ordinal = 0
             WHERE COALESCE(f.value_norm, '') = ''
-            ORDER BY d.item_key
+            ORDER BY i.item_key
         """
         params_list: list[object] = [field_name]
         params: tuple[object, ...] = ()
@@ -599,9 +712,9 @@ class LexicalIndex:
         row = self._conn.execute(
             """
             SELECT COUNT(*) AS c
-            FROM documents d
+            FROM items i
             LEFT JOIN item_fields f
-              ON f.item_key = d.item_key
+              ON f.item_key = i.item_key
              AND f.field_name = ?
              AND f.ordinal = 0
             WHERE COALESCE(f.value_norm, '') = ''
@@ -617,7 +730,7 @@ class LexicalIndex:
         row = self._conn.execute(
             f"""
             SELECT COUNT(*) AS c
-            FROM documents
+            FROM items
             WHERE {column} IS NULL OR {column} != ?
             """,
             (int(target_version),),
@@ -635,7 +748,7 @@ class LexicalIndex:
             raise ValueError(f"Unsupported profile version column: {column}")
         sql = f"""
             SELECT item_key
-            FROM documents
+            FROM items
             WHERE {column} IS NULL OR {column} != ?
             ORDER BY item_key
         """
@@ -709,11 +822,15 @@ class LexicalIndex:
         citation_key: str | None = None,
         journal: str | None = None,
     ) -> bool:
-        row = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
-        if row is None:
+        row = self._conn.execute("SELECT raw_json FROM items WHERE item_key = ?", (item_key,)).fetchone()
+        raw_json = row["raw_json"] if row is not None else None
+        if raw_json is None:
+            fallback = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
+            if fallback is not None:
+                raw_json = fallback["item_json"]
+        if raw_json is None:
             return False
-
-        item = Item.model_validate_json(str(row["item_json"]))
+        item = Item.model_validate_json(str(raw_json))
         changed = False
 
         if doi is not None:
@@ -740,6 +857,21 @@ class LexicalIndex:
         with self._conn:
             self._conn.execute(
                 """
+                UPDATE items
+                SET raw_json = ?, doi_norm = ?, title = ?, item_type = ?, date = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE item_key = ?
+                """,
+                (
+                    item.model_dump_json(),
+                    self._normalize_doi(item.doi),
+                    item.title,
+                    item.item_type,
+                    item.date,
+                    item_key,
+                ),
+            )
+            self._conn.execute(
+                """
                 UPDATE documents
                 SET item_json = ?, doi_norm = ?, citation_key_norm = ?, journal_norm = ?
                 WHERE item_key = ?
@@ -756,7 +888,9 @@ class LexicalIndex:
         return True
 
     def get_content_hash(self, item_key: str) -> str | None:
-        row = self._conn.execute("SELECT content_hash FROM documents WHERE item_key = ?", (item_key,)).fetchone()
+        row = self._conn.execute("SELECT content_hash FROM items WHERE item_key = ?", (item_key,)).fetchone()
+        if row is None:
+            row = self._conn.execute("SELECT content_hash FROM documents WHERE item_key = ?", (item_key,)).fetchone()
         if row is None:
             return None
         value = row["content_hash"]
@@ -766,11 +900,20 @@ class LexicalIndex:
         row = self._conn.execute(
             """
             SELECT lexical_hash, vector_hash, content_hash
-            FROM documents
+            FROM items
             WHERE item_key = ?
             """,
             (item_key,),
         ).fetchone()
+        if row is None:
+            row = self._conn.execute(
+                """
+                SELECT lexical_hash, vector_hash, content_hash
+                FROM documents
+                WHERE item_key = ?
+                """,
+                (item_key,),
+            ).fetchone()
         if row is None:
             return None, None, None
         lexical_hash = str(row["lexical_hash"]) if row["lexical_hash"] else None
@@ -782,11 +925,20 @@ class LexicalIndex:
         row = self._conn.execute(
             """
             SELECT lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version
-            FROM documents
+            FROM items
             WHERE item_key = ?
             """,
             (item_key,),
         ).fetchone()
+        if row is None:
+            row = self._conn.execute(
+                """
+                SELECT lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version
+                FROM documents
+                WHERE item_key = ?
+                """,
+                (item_key,),
+            ).fetchone()
         if row is None:
             return None, None, None, None, None
 
@@ -831,6 +983,10 @@ class LexicalIndex:
         with self._conn:
             cursor = self._conn.execute(
                 f"UPDATE documents SET {', '.join(updates)} WHERE item_key = ?",
+                tuple(params),
+            )
+            self._conn.execute(
+                f"UPDATE items SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE item_key = ?",
                 tuple(params),
             )
         return cursor.rowcount > 0

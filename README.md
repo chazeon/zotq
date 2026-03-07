@@ -188,14 +188,16 @@ It also reports lexical/vector profile-version mismatch counts and sample mismat
 - Already cut over:
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
+  - Transitional canonical `items` table (backfilled + dual-written) used for item reads and sync/profile hash state.
   - Split hash incremental sync and resume checkpoints.
   - `index inspect` profile-version mismatch reporting.
   - Explicit profile mismatch remediation via `index sync --profiles-only`.
   - `collection export` command surface and source-backed pagination/batching flow.
 - Still compatibility-backed:
-  - `documents` remains the canonical item-json row store during transition.
+  - Search SQL still uses `documents` joins in compatibility mode during transition.
+  - `documents` item-json rows are still dual-written during migration.
   - Legacy normalized columns in `documents` are still maintained for compatibility.
-  - Final `items`-first canonical metadata cutover is not complete yet.
+  - Final `items`-first query-path cutover is not complete yet.
 
 Run semantic search:
 
