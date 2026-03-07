@@ -8,7 +8,7 @@ import re
 
 from .factory import build_index_service, build_source_adapter
 from .index_service import MockIndexService
-from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchBackend, SearchMode, SearchResult, Tag
+from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchBackend, SearchHit, SearchMode, SearchResult, Tag
 from .query_engine import QueryEngine
 from .sources import SourceAdapter
 
@@ -51,10 +51,66 @@ class ZotQueryClient:
             "adapter": adapter_health.get("adapter", "unknown"),
         }
 
+    @staticmethod
+    def _normalize_doi(value: str | None) -> str:
+        raw = (value or "").strip().lower()
+        if raw.startswith("https://doi.org/"):
+            raw = raw[len("https://doi.org/") :]
+        if raw.startswith("http://doi.org/"):
+            raw = raw[len("http://doi.org/") :]
+        if raw.startswith("doi:"):
+            raw = raw[4:]
+        return raw.strip()
+
+    @staticmethod
+    def _normalize_citation_key(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    @classmethod
+    def _matches_identifier_filters(cls, item: Item, query: QuerySpec) -> bool:
+        if query.doi and cls._normalize_doi(query.doi) != cls._normalize_doi(item.doi):
+            return False
+        if query.citation_key and cls._normalize_citation_key(query.citation_key) != cls._normalize_citation_key(item.citation_key):
+            return False
+        return True
+
+    def _search_route(self, route: str, query: QuerySpec) -> list[SearchHit]:
+        if route == "index":
+            return self._index.search(query)
+        return self._source.search_items(query)
+
+    def _identifier_short_circuit(
+        self,
+        *,
+        query: QuerySpec,
+        route: str,
+        source_capabilities: BackendCapabilities,
+        index_capabilities: BackendCapabilities,
+    ) -> tuple[SearchMode, list[SearchHit]] | None:
+        if not query.doi and not query.citation_key:
+            return None
+        if route == "index" and not index_capabilities.keyword:
+            return None
+        if route == "source" and not source_capabilities.keyword:
+            return None
+
+        identifier_query = query.model_copy(deep=True)
+        identifier_query.search_mode = SearchMode.KEYWORD
+        identifier_query.text = None
+        identifier_query.offset = 0
+        identifier_query.limit = min(500, max(query.limit + query.offset, query.limit))
+
+        hits = self._search_route(route, identifier_query)
+        exact_hits = [hit for hit in hits if self._matches_identifier_filters(hit.item, query)]
+        if not exact_hits:
+            return None
+
+        exact_hits.sort(key=lambda hit: hit.item.key)
+        return SearchMode.KEYWORD, exact_hits[query.offset : query.offset + query.limit]
+
     def search(self, query: QuerySpec) -> SearchResult:
         source_capabilities = self._source.capabilities()
         index_capabilities = self._index.capabilities()
-        index_status = self._index.status()
 
         if query.backend == SearchBackend.SOURCE:
             effective_capabilities = source_capabilities
@@ -80,14 +136,29 @@ class ZotQueryClient:
             allow_fallback=query.allow_fallback,
         )
 
+        route = forced_route or ("index" if getattr(index_capabilities, executed_mode.value, False) else "source")
+
+        exact = self._identifier_short_circuit(
+            query=query,
+            route=route,
+            source_capabilities=source_capabilities,
+            index_capabilities=index_capabilities,
+        )
+        if exact is not None:
+            exact_mode, exact_hits = exact
+            return SearchResult(
+                requested_mode=query.search_mode,
+                executed_mode=exact_mode,
+                limit=query.limit,
+                offset=query.offset,
+                total=len(exact_hits),
+                hits=exact_hits,
+            )
+
         executed_query = query.model_copy(deep=True)
         executed_query.search_mode = executed_mode
 
-        route = forced_route or ("index" if getattr(index_capabilities, executed_mode.value, False) else "source")
-        if route == "index":
-            hits = self._index.search(executed_query)
-        else:
-            hits = self._source.search_items(executed_query)
+        hits = self._search_route(route, executed_query)
 
         return SearchResult(
             requested_mode=query.search_mode,

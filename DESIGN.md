@@ -233,7 +233,9 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 
 ### 5.7 Query Pipeline (v2)
 1. Identifier short-circuit:
-   - If `--doi` provided, normalized DOI filter is applied.
+   - If `--doi` and/or `--citation-key` is provided, run an exact identifier lookup first.
+   - Execute that lookup in `keyword` mode on the routed backend (`auto|source|index`).
+   - If exact hits exist, return immediately; if none, continue to normal mode pipeline.
 2. Structured filtering:
    - Apply `item_type`, date range, creator/tag/field filters from normalized tables.
    - Implemented filters include `title`, `doi`, `journal`, `citation_key`, `creators`, `tags`, `item_type`, and year bounds.

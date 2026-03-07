@@ -211,6 +211,7 @@ uv run zotq --mode local-api --output json search run "mantle hydration" --backe
 ```
 
 Notes:
+- If `--doi` or `--citation-key` is provided, `zotq` first runs an exact identifier lookup in `keyword` mode on the selected backend route (`auto|source|index`). If no exact hit is found, it falls back to the requested search mode.
 - DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
 - Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
 - Local index search now stores normalized DOI/citation-key/journal columns with SQLite indexes, so structured filters are applied in SQL before ranking.
