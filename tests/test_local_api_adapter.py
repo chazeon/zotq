@@ -35,13 +35,33 @@ def test_get_item_parses_zotero_payload() -> None:
             200,
             json={
                 "key": "MI26RYRR",
+                "meta": {
+                    "creatorSummary": "Nishi",
+                    "parsedDate": "2015",
+                    "numChildren": 1,
+                },
                 "data": {
                     "itemType": "journalArticle",
                     "title": "Mantle hydration",
                     "date": "2015",
                     "abstractNote": "summary",
+                    "DOI": "10.1234/example",
+                    "publicationTitle": "Geophysical Journal",
+                    "url": "https://example.test/paper",
+                    "language": "en",
+                    "shortTitle": "Mantle hydration",
+                    "libraryCatalog": "Crossref",
+                    "accessDate": "2026-01-01T00:00:00Z",
+                    "volume": "42",
+                    "pages": "1-12",
+                    "journalAbbreviation": "Geophys. J.",
+                    "ISSN": "1234-5678",
+                    "extra": "Citation Key: nishi2015mantle",
+                    "citationKey": "nishi2015mantle",
                     "creators": [{"firstName": "Masayuki", "lastName": "Nishi"}],
                     "tags": [{"tag": "mantle"}],
+                    "collections": ["AAA111"],
+                    "relations": {"dc:relation": "https://example.test/related"},
                 },
             },
         )
@@ -55,6 +75,13 @@ def test_get_item_parses_zotero_payload() -> None:
     assert item.title == "Mantle hydration"
     assert item.item_type == "journalArticle"
     assert item.tags == ["mantle"]
+    assert item.doi == "10.1234/example"
+    assert item.journal == "Geophysical Journal"
+    assert item.citation_key == "nishi2015mantle"
+    assert item.collections == ["AAA111"]
+    assert item.relations == {"dc:relation": "https://example.test/related"}
+    assert item.source_meta.get("parsedDate") == "2015"
+    assert item.source_payload.get("data", {}).get("publicationTitle") == "Geophysical Journal"
 
 
 @respx.mock
@@ -138,3 +165,83 @@ def test_search_items_applies_filters_after_api_query() -> None:
 
     assert len(hits) == 1
     assert hits[0].item.key == "MI26RYRR"
+
+
+@respx.mock
+def test_search_items_applies_doi_journal_and_citation_key_filters() -> None:
+    respx.get("http://zotero.test/api/users/0/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "XVMVWQZX",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Thermodynamics with the Gruneisen parameter",
+                        "date": "2019",
+                        "DOI": "10.1016/j.pepi.2018.10.006",
+                        "publicationTitle": "Physics of the Earth and Planetary Interiors",
+                        "citationKey": "staceyThermodynamicsGruneisenParameter2019",
+                    },
+                },
+                {
+                    "key": "MI26RYRR",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Mantle hydration",
+                        "date": "2015",
+                        "DOI": "10.1234/example",
+                        "publicationTitle": "Geophysical Journal",
+                        "citationKey": "nishi2015mantle",
+                    },
+                },
+            ],
+        )
+    )
+
+    adapter = build_local_adapter()
+    hits = adapter.search_items(
+        QuerySpec(
+            doi="https://doi.org/10.1016/j.pepi.2018.10.006",
+            journal="planetary interiors",
+            citation_key="staceythermodynamicsgruneisenparameter2019",
+            search_mode=SearchMode.KEYWORD,
+            limit=20,
+            offset=0,
+        )
+    )
+
+    assert len(hits) == 1
+    assert hits[0].item.key == "XVMVWQZX"
+
+
+@respx.mock
+def test_search_items_uses_citation_key_from_extra_when_field_missing() -> None:
+    respx.get("http://zotero.test/api/users/0/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "XVMVWQZX",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Thermodynamics with the Gruneisen parameter",
+                        "extra": "Citation Key: staceyThermodynamicsGruneisenParameter2019",
+                    },
+                }
+            ],
+        )
+    )
+
+    adapter = build_local_adapter()
+    hits = adapter.search_items(
+        QuerySpec(
+            citation_key="staceythermodynamicsgruneisenparameter2019",
+            search_mode=SearchMode.KEYWORD,
+            limit=20,
+            offset=0,
+        )
+    )
+
+    assert len(hits) == 1
+    assert hits[0].item.key == "XVMVWQZX"

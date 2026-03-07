@@ -15,6 +15,9 @@ def item_to_text(item: Item) -> str:
     parts = [
         item.title or "",
         item.abstract or "",
+        item.doi or "",
+        item.journal or "",
+        item.citation_key or "",
         creators,
         tags,
         item.date or "",

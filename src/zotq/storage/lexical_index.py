@@ -142,7 +142,7 @@ class LexicalIndex:
 
     def search_keyword(self, query: QuerySpec) -> list[SearchHit]:
         if not query.text:
-            return []
+            return self._search_by_filters_only(query, mode_name="keyword")
 
         # bm25() cannot be used safely inside grouped aggregate expressions on all SQLite builds,
         # so collect chunk-level results first and then collapse to unique item keys in Python.
@@ -175,6 +175,8 @@ class LexicalIndex:
             item = self.get_item(key)
             if not item:
                 continue
+            if not self._matches_filters(item, query):
+                continue
             final_score = self._keyword_final_score(item, query, raw_score)
             ranked.append((final_score, self._is_attachment(item), item.key, item))
 
@@ -188,7 +190,7 @@ class LexicalIndex:
 
     def search_fuzzy(self, query: QuerySpec) -> list[SearchHit]:
         if not query.text:
-            return []
+            return self._search_by_filters_only(query, mode_name="fuzzy")
 
         target = query.text.lower()
         rows = self._conn.execute(
@@ -205,6 +207,8 @@ class LexicalIndex:
             )
             if target in title or target in full_text or similarity >= 0.45:
                 item = Item.model_validate_json(row["item_json"])
+                if not self._matches_filters(item, query):
+                    continue
                 score = self._fuzzy_final_score(item, query, similarity)
                 scored.append((score, self._is_attachment(item), item.key, item))
 
@@ -248,6 +252,70 @@ class LexicalIndex:
     def _fuzzy_final_score(self, item: Item, query: QuerySpec, similarity: float) -> float:
         boosted = similarity + (self._title_bonus(item, query) / 4.0)
         return boosted * self._attachment_penalty(item, query)
+
+    @staticmethod
+    def _extract_year(date_value: str | None) -> int | None:
+        if not date_value:
+            return None
+        if len(date_value) >= 4 and date_value[:4].isdigit():
+            return int(date_value[:4])
+        return None
+
+    @staticmethod
+    def _normalize_doi(value: str | None) -> str:
+        raw = (value or "").strip().lower()
+        if raw.startswith("https://doi.org/"):
+            raw = raw[len("https://doi.org/") :]
+        if raw.startswith("http://doi.org/"):
+            raw = raw[len("http://doi.org/") :]
+        if raw.startswith("doi:"):
+            raw = raw[4:]
+        return raw.strip()
+
+    @staticmethod
+    def _normalize_citation_key(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    @classmethod
+    def _matches_filters(cls, item: Item, query: QuerySpec) -> bool:
+        if query.title and query.title.lower() not in (item.title or "").lower():
+            return False
+        if query.doi and cls._normalize_doi(query.doi) != cls._normalize_doi(item.doi):
+            return False
+        if query.journal and query.journal.lower() not in (item.journal or "").lower():
+            return False
+        if query.citation_key and cls._normalize_citation_key(query.citation_key) != cls._normalize_citation_key(item.citation_key):
+            return False
+        if query.item_type and query.item_type != item.item_type:
+            return False
+        if query.tags:
+            item_tags = {tag.lower() for tag in item.tags}
+            if not all(tag.lower() in item_tags for tag in query.tags):
+                return False
+        if query.creators:
+            creator_blob = " ".join(
+                f"{creator.first_name or ''} {creator.last_name or ''}".strip().lower() for creator in item.creators
+            )
+            for creator in query.creators:
+                if creator.lower() not in creator_blob:
+                    return False
+        year = cls._extract_year(item.date)
+        if query.year_from is not None and year is not None and year < query.year_from:
+            return False
+        if query.year_to is not None and year is not None and year > query.year_to:
+            return False
+        return True
+
+    def _search_by_filters_only(self, query: QuerySpec, *, mode_name: str) -> list[SearchHit]:
+        rows = self._conn.execute("SELECT item_json FROM documents ORDER BY item_key").fetchall()
+        hits: list[SearchHit] = []
+        for row in rows:
+            item = Item.model_validate_json(row["item_json"])
+            if not self._matches_filters(item, query):
+                continue
+            score = self._attachment_penalty(item, query)
+            hits.append(SearchHit(item=item, score=score, score_breakdown={mode_name: score}))
+        return hits[query.offset : query.offset + query.limit]
 
     def close(self) -> None:
         self._conn.close()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +19,8 @@ class OutputFormat(str, Enum):
     TABLE = "table"
     JSON = "json"
     JSONL = "jsonl"
+    BIB = "bib"
+    BIBTEX = "bibtex"
 
 
 class SearchMode(str, Enum):
@@ -28,11 +30,18 @@ class SearchMode(str, Enum):
     HYBRID = "hybrid"
 
 
+class SearchBackend(str, Enum):
+    AUTO = "auto"
+    SOURCE = "source"
+    INDEX = "index"
+
+
 class Creator(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     first_name: str | None = None
     last_name: str | None = None
+    creator_type: str | None = None
 
 
 class Item(BaseModel):
@@ -45,6 +54,23 @@ class Item(BaseModel):
     creators: list[Creator] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     abstract: str | None = None
+    doi: str | None = None
+    journal: str | None = None
+    url: str | None = None
+    language: str | None = None
+    short_title: str | None = None
+    library_catalog: str | None = None
+    access_date: str | None = None
+    volume: str | None = None
+    pages: str | None = None
+    journal_abbreviation: str | None = None
+    issn: str | None = None
+    extra: str | None = None
+    citation_key: str | None = None
+    collections: list[str] = Field(default_factory=list)
+    relations: dict[str, Any] = Field(default_factory=dict)
+    source_meta: dict[str, Any] = Field(default_factory=dict)
+    source_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class Collection(BaseModel):
@@ -197,9 +223,13 @@ class QuerySpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     text: str | None = None
+    backend: SearchBackend = SearchBackend.AUTO
     search_mode: SearchMode = SearchMode.KEYWORD
     allow_fallback: bool = False
     title: str | None = None
+    doi: str | None = None
+    journal: str | None = None
+    citation_key: str | None = None
     creators: list[str] = Field(default_factory=list)
     year_from: int | None = None
     year_to: int | None = None

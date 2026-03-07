@@ -161,9 +161,30 @@ class MockIndexService:
             return int(date_value[:4])
         return None
 
+    @staticmethod
+    def _normalize_doi(value: str | None) -> str:
+        raw = (value or "").strip().lower()
+        if raw.startswith("https://doi.org/"):
+            raw = raw[len("https://doi.org/") :]
+        if raw.startswith("http://doi.org/"):
+            raw = raw[len("http://doi.org/") :]
+        if raw.startswith("doi:"):
+            raw = raw[4:]
+        return raw.strip()
+
+    @staticmethod
+    def _normalize_citation_key(value: str | None) -> str:
+        return (value or "").strip().lower()
+
     @classmethod
     def _matches_filters(cls, item: Item, query: QuerySpec) -> bool:
         if query.title and query.title.lower() not in (item.title or "").lower():
+            return False
+        if query.doi and cls._normalize_doi(query.doi) != cls._normalize_doi(item.doi):
+            return False
+        if query.journal and query.journal.lower() not in (item.journal or "").lower():
+            return False
+        if query.citation_key and cls._normalize_citation_key(query.citation_key) != cls._normalize_citation_key(item.citation_key):
             return False
         if query.item_type and query.item_type != item.item_type:
             return False

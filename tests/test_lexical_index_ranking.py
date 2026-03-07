@@ -114,3 +114,40 @@ def test_fuzzy_ties_are_deterministic_by_item_key(tmp_path: Path) -> None:
         assert [hit.item.key for hit in hits[:2]] == ["F-A", "F-B"]
     finally:
         index.close()
+
+
+def test_keyword_filter_only_path_supports_doi_journal_and_citation_key(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        target = Item(
+            key="TARGET",
+            item_type="journalArticle",
+            title="Thermodynamics with the Gruneisen parameter",
+            doi="10.1016/j.pepi.2018.10.006",
+            journal="Physics of the Earth and Planetary Interiors",
+            citation_key="staceyThermodynamicsGruneisenParameter2019",
+        )
+        other = Item(
+            key="OTHER",
+            item_type="journalArticle",
+            title="Mantle hydration",
+            doi="10.1234/example",
+            journal="Geophysical Journal",
+            citation_key="nishi2015mantle",
+        )
+        _upsert(index, target, "thermodynamics gruneisen")
+        _upsert(index, other, "mantle hydration")
+
+        hits = index.search_keyword(
+            QuerySpec(
+                search_mode=SearchMode.KEYWORD,
+                doi="doi:10.1016/j.pepi.2018.10.006",
+                journal="planetary interiors",
+                citation_key="staceythermodynamicsgruneisenparameter2019",
+                limit=10,
+            )
+        )
+
+        assert [hit.item.key for hit in hits] == ["TARGET"]
+    finally:
+        index.close()

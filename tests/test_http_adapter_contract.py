@@ -204,3 +204,58 @@ def test_search_contract_paginates_and_filters_mixed_types(builder, root: str) -
 
     assert len(hits) == 2
     assert [h.item.key for h in hits] == ["MI26RYRR", "XJP5WU22"]
+
+
+@pytest.mark.parametrize(
+    ("builder", "root"),
+    [
+        (_build_local, "http://local.test/api/users/0"),
+        (_build_remote, "http://remote.test/users/0"),
+    ],
+)
+@respx.mock
+def test_search_contract_filters_doi_journal_and_citation_key(builder, root: str) -> None:
+    respx.get(f"{root}/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "XVMVWQZX",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Thermodynamics with the Gruneisen parameter",
+                        "date": "2019",
+                        "DOI": "10.1016/j.pepi.2018.10.006",
+                        "publicationTitle": "Physics of the Earth and Planetary Interiors",
+                        "citationKey": "staceyThermodynamicsGruneisenParameter2019",
+                    },
+                },
+                {
+                    "key": "MI26RYRR",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Mantle hydration",
+                        "date": "2015",
+                        "DOI": "10.1234/example",
+                        "publicationTitle": "Geophysical Journal",
+                        "citationKey": "nishi2015mantle",
+                    },
+                },
+            ],
+        )
+    )
+
+    adapter = builder()
+    hits = adapter.search_items(
+        QuerySpec(
+            search_mode=SearchMode.KEYWORD,
+            doi="https://doi.org/10.1016/j.pepi.2018.10.006",
+            journal="planetary interiors",
+            citation_key="staceythermodynamicsgruneisenparameter2019",
+            limit=20,
+            offset=0,
+        )
+    )
+
+    assert len(hits) == 1
+    assert hits[0].item.key == "XVMVWQZX"
