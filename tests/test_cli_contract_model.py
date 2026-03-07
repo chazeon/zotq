@@ -16,6 +16,7 @@ def test_v1_command_contract_contains_expected_commands() -> None:
     assert "index status" in names
     assert "index sync" in names
     assert "index rebuild" in names
+    assert "index enrich" in names
 
 
 def test_reserved_write_space_is_modeled_for_future() -> None:

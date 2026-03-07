@@ -53,7 +53,10 @@ def test_client_index_sync_reports_collect_and_index_progress() -> None:
     assert status.ready is True
     assert any(event[0] == "collect" for event in events)
     assert any(event[0] == "index" for event in events)
+    assert any(event[0] == "enrich" for event in events)
     collect_events = [event for event in events if event[0] == "collect"]
     assert collect_events
     assert collect_events[-1] == ("collect", 4, 4)
-    assert events[-1][0] == "index"
+    enrich_events = [event for event in events if event[0] == "enrich"]
+    assert enrich_events
+    assert events[-1][0] == "enrich"

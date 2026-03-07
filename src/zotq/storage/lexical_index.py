@@ -212,6 +212,39 @@ class LexicalIndex:
             return None
         return Item.model_validate_json(row["item_json"])
 
+    def list_item_keys_missing_citation_key(self) -> list[str]:
+        rows = self._conn.execute(
+            """
+            SELECT item_key
+            FROM documents
+            WHERE citation_key_norm IS NULL OR citation_key_norm = ''
+            ORDER BY item_key
+            """
+        ).fetchall()
+        return [str(row["item_key"]) for row in rows]
+
+    def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
+        clean = citation_key.strip()
+        if not clean:
+            return False
+
+        row = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
+        if row is None:
+            return False
+
+        item = Item.model_validate_json(str(row["item_json"]))
+        item.citation_key = clean
+        with self._conn:
+            self._conn.execute(
+                """
+                UPDATE documents
+                SET item_json = ?, citation_key_norm = ?
+                WHERE item_key = ?
+                """,
+                (item.model_dump_json(), self._normalize_citation_key(clean), item_key),
+            )
+        return True
+
     def get_content_hash(self, item_key: str) -> str | None:
         row = self._conn.execute("SELECT content_hash FROM documents WHERE item_key = ?", (item_key,)).fetchone()
         if row is None:

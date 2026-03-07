@@ -94,10 +94,12 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
     ) as progress:
         collect_task = progress.add_task("Collecting items", total=None)
         index_task = progress.add_task("Indexing items", total=1, completed=0, visible=False)
+        enrich_task = progress.add_task("Enriching citation keys", total=1, completed=0, visible=False)
         index_started = False
+        enrich_started = False
 
         def callback(phase: str, current: int, total: int | None) -> None:
-            nonlocal index_started
+            nonlocal index_started, enrich_started
             if phase == "collect":
                 if total is not None and total > 0:
                     progress.update(collect_task, total=total)
@@ -119,10 +121,30 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
                     if total is not None:
                         progress.update(index_task, total=max(1, total))
                     progress.update(index_task, completed=max(0, current))
+                return
+
+            if phase == "enrich":
+                if not enrich_started:
+                    if not index_started:
+                        progress.update(collect_task, description="Collecting items (done)", total=1, completed=1)
+                    progress.update(
+                        enrich_task,
+                        visible=True,
+                        total=max(1, total or 1),
+                        completed=max(0, current),
+                    )
+                    enrich_started = True
+                else:
+                    if total is not None:
+                        progress.update(enrich_task, total=max(1, total))
+                    progress.update(enrich_task, completed=max(0, current))
+                return
 
         status = fn(callback)
         if index_started:
             progress.update(index_task, description=f"{action.capitalize()} index (done)")
+        if enrich_started:
+            progress.update(enrich_task, description="Enriching citation keys (done)")
         return status
 
 
@@ -415,6 +437,25 @@ def index_rebuild(runtime: RuntimeContext, show_progress: bool) -> None:
     except BackendConnectionError as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {"action": "rebuild", "status": status}
+    click.echo(render_payload(payload, runtime.output))
+
+
+@index_group.command("enrich")
+@click.option("show_progress", "--progress/--no-progress", default=True, help="Show progress in table output.")
+@pass_runtime
+def index_enrich(runtime: RuntimeContext, show_progress: bool) -> None:
+    try:
+        if show_progress:
+            result = _run_with_index_progress(
+                runtime,
+                "enrich",
+                lambda progress: runtime.client.index_enrich_citation_keys(progress=progress),
+            )
+        else:
+            result = runtime.client.index_enrich_citation_keys()
+    except (BackendConnectionError, IndexNotReadyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {"action": "enrich", "citation_keys": result}
     click.echo(render_payload(payload, runtime.output))
 
 

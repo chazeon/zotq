@@ -136,6 +136,12 @@ class MockIndexService:
         self._checkpoints.write(last_sync_at=datetime.now().astimezone())
         return self.status()
 
+    def list_items_missing_citation_key(self) -> list[str]:
+        return self._lexical.list_item_keys_missing_citation_key()
+
+    def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
+        return self._lexical.set_item_citation_key(item_key, citation_key)
+
     def search(self, query: QuerySpec):
         status = self.status()
         if not status.enabled:

@@ -487,6 +487,12 @@ def test_index_sync_full_returns_ready_status() -> None:
             ],
         )
     )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "MI26RYRR", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{nishiMantleHydration2015,}")
+    )
+    respx.get("http://remote.test/users/0/items/MI26RYRR", params={"format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{nishiMantleHydration2015,}")
+    )
 
     runner = CliRunner()
     result = invoke_remote(runner, ["--output", "json", "index", "sync", "--full"])
@@ -518,6 +524,12 @@ def test_index_sync_json_output_ignores_progress_rendering() -> None:
             ],
         )
     )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "MI26RYRR", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{nishiMantleHydration2015,}")
+    )
+    respx.get("http://remote.test/users/0/items/MI26RYRR", params={"format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{nishiMantleHydration2015,}")
+    )
 
     runner = CliRunner()
     result = invoke_remote(runner, ["--output", "json", "index", "sync", "--full", "--progress"])
@@ -526,3 +538,15 @@ def test_index_sync_json_output_ignores_progress_rendering() -> None:
     payload = json.loads(result.output)
     assert payload["action"] == "sync"
     assert payload["status"]["ready"] is True
+
+
+def test_index_enrich_returns_counts_when_index_empty() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "index", "enrich", "--no-progress"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["action"] == "enrich"
+    assert payload["citation_keys"]["missing"] == 0
+    assert payload["citation_keys"]["updated"] == 0
+    assert payload["citation_keys"]["remaining"] == 0

@@ -36,9 +36,10 @@ Tech constraints:
   - `item citekey`
   - `collection list`
   - `tag list`
-  - `index status`
-  - `index sync`
-  - `index rebuild`
+- `index status`
+- `index sync`
+- `index rebuild`
+- `index enrich`
 - Metadata-first indexing and chunking (attachment extraction remains extensible roadmap work).
 - Local index storage for lexical + vector retrieval.
 - Config precedence: CLI > env vars > TOML > defaults.
@@ -319,6 +320,8 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
   - Full rescan + reindex.
 - `index rebuild`
   - Drops and rebuilds local indexes from source.
+- `index enrich`
+  - Metadata-only enrichment pass (for example citation keys) without full lexical/vector rebuild.
 
 ### 6.6 Reserved Verb Space (Post-v1)
 Keep these verbs reserved now so future write features fit without CLI breakage:
