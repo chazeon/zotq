@@ -36,10 +36,17 @@ class LocalApiSourceAdapter(HttpZoteroSourceAdapter):
         self._rpc_url = f"{cfg.base_url.rstrip('/')}/better-bibtex/json-rpc"
 
     def get_item_citation_key_rpc(self, key: str) -> str | None:
+        resolved = self.get_items_citation_keys_rpc([key])
+        return resolved.get(key)
+
+    def get_items_citation_keys_rpc(self, keys: list[str]) -> dict[str, str]:
+        clean_keys = [key.strip() for key in keys if key and key.strip()]
+        if not clean_keys:
+            return {}
         payload = {
             "jsonrpc": "2.0",
             "method": "item.citationkey",
-            "params": [[f"{self._library_id}:{key}"]],
+            "params": [[f"{self._library_id}:{key}" for key in clean_keys]],
             "id": "zotq",
         }
         try:
@@ -47,32 +54,40 @@ class LocalApiSourceAdapter(HttpZoteroSourceAdapter):
             response.raise_for_status()
             body = response.json()
         except (httpx.HTTPError, ValueError):
-            return None
+            return {}
 
         if not isinstance(body, Mapping):
-            return None
+            return {}
         result = body.get("result")
+
+        resolved: dict[str, str] = {}
+
+        def _set_value(item_key: str, value: str | None) -> None:
+            if value and value.strip():
+                resolved[item_key] = value.strip()
+
+        key_by_full = {f"{self._library_id}:{key}": key for key in clean_keys}
+
         if isinstance(result, str):
-            return result.strip() or None
+            if len(clean_keys) == 1:
+                _set_value(clean_keys[0], result)
+            return resolved
         if isinstance(result, list):
-            for entry in result:
-                if isinstance(entry, str) and entry.strip():
-                    return entry.strip()
-            return None
+            for item_key, value in zip(clean_keys, result):
+                if isinstance(value, str):
+                    _set_value(item_key, value)
+            return resolved
         if isinstance(result, Mapping):
-            for candidate_key in (f"{self._library_id}:{key}", key):
-                value = result.get(candidate_key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-                if isinstance(value, list):
+            for result_key, value in result.items():
+                normalized_key = str(result_key)
+                item_key = key_by_full.get(normalized_key, normalized_key)
+                if isinstance(value, str):
+                    _set_value(item_key, value)
+                elif isinstance(value, list):
                     for entry in value:
                         if isinstance(entry, str) and entry.strip():
-                            return entry.strip()
-            for value in result.values():
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-                if isinstance(value, list):
-                    for entry in value:
-                        if isinstance(entry, str) and entry.strip():
-                            return entry.strip()
-        return None
+                            _set_value(item_key, entry)
+                            break
+            return resolved
+
+        return resolved

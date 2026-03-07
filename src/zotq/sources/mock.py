@@ -113,6 +113,14 @@ class MockSourceAdapter:
             return None
         return item.citation_key
 
+    def get_items_citation_keys_rpc(self, keys: list[str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key in keys:
+            value = self.get_item_citation_key_rpc(key)
+            if value:
+                out[key] = value
+        return out
+
     def get_items_bibtex(self, keys: list[str]) -> str | None:
         entries: list[str] = []
         for key in keys:

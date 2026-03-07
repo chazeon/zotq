@@ -119,6 +119,58 @@ class ZotQueryClient:
             return None
         return match.group(1).strip() or None
 
+    @staticmethod
+    def _citation_keys_from_bibtex_entries(bibtex: str | None) -> list[str]:
+        if not bibtex:
+            return []
+        values = re.findall(r"@\w+\s*\{\s*([^,\s]+)\s*,", bibtex)
+        return [value.strip() for value in values if value and value.strip()]
+
+    def _enrich_missing_citation_keys(self, items: list[Item], *, progress: ProgressCallback | None = None) -> None:
+        missing = [item for item in items if not (item.citation_key and item.citation_key.strip())]
+        if not missing:
+            return
+
+        total = len(missing)
+        enriched = 0
+
+        batch_rpc = getattr(self._source, "get_items_citation_keys_rpc", None)
+        if callable(batch_rpc):
+            for start in range(0, total, 200):
+                batch = missing[start : start + 200]
+                keys = [item.key for item in batch]
+                resolved = batch_rpc(keys) or {}
+                for item in batch:
+                    value = resolved.get(item.key)
+                    if value and value.strip():
+                        item.citation_key = value.strip()
+                        enriched += 1
+                if progress is not None:
+                    progress("enrich", min(start + len(batch), total), total)
+        else:
+            for index, item in enumerate(missing, start=1):
+                value = self._source.get_item_citation_key_rpc(item.key)
+                if value and value.strip():
+                    item.citation_key = value.strip()
+                    enriched += 1
+                if progress is not None:
+                    progress("enrich", index, total)
+
+        still_missing = [item for item in missing if not (item.citation_key and item.citation_key.strip())]
+        if not still_missing:
+            return
+
+        for start in range(0, len(still_missing), 100):
+            batch = still_missing[start : start + 100]
+            keys = [item.key for item in batch]
+            merged = self._source.get_items_bibtex(keys)
+            parsed = self._citation_keys_from_bibtex_entries(merged)
+            if len(parsed) != len(batch):
+                continue
+            for item, citation_key in zip(batch, parsed):
+                if citation_key and citation_key.strip():
+                    item.citation_key = citation_key.strip()
+
     def get_item_citation_key(self, key: str, *, prefer: str = "auto") -> dict[str, str | bool | None]:
         prefer_mode = prefer.strip().lower()
         item = self.get_item(key)
@@ -232,6 +284,7 @@ class ZotQueryClient:
             if len(page) < page_size:
                 break
             offset += len(page)
+        self._enrich_missing_citation_keys(items, progress=progress)
         return items
 
     def index_sync(self, *, full: bool = False, progress: ProgressCallback | None = None):

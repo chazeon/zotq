@@ -34,6 +34,9 @@ class SourceAdapter(Protocol):
     def get_item_citation_key_rpc(self, key: str) -> str | None:
         ...
 
+    def get_items_citation_keys_rpc(self, keys: list[str]) -> dict[str, str]:
+        ...
+
     def get_items_bibtex(self, keys: list[str]) -> str | None:
         ...
 

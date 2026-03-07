@@ -124,6 +124,7 @@ Click CLI
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
 - DOI filtering is normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
 - Citation-key filtering is case-insensitive and also uses `extra` fallback parsing (`Citation Key: ...`) when `citationKey` is absent.
+- Sync-time citation key enrichment is best-effort: batch Better BibTeX RPC lookup first, then batch BibTeX parse fallback.
 
 ### 5.2 v2 Goals
 - Add fields over time (for example DOI, journal, publisher) without expensive full rebuilds.

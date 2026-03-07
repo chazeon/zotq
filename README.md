@@ -206,6 +206,7 @@ Notes:
 - DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
 - Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
 - Local index search now stores normalized DOI/citation-key/journal columns with SQLite indexes, so structured filters are applied in SQL before ranking.
+- During `index sync`/`index rebuild`, missing citation keys are enriched (batch Better BibTeX RPC first, then batch BibTeX parse fallback when available).
 
 Resolve citation key:
 
