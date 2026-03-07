@@ -380,6 +380,86 @@ def test_get_item_reads_from_items_table_when_documents_row_missing(tmp_path: Pa
         index.close()
 
 
+def test_keyword_search_reads_from_items_when_documents_rows_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        _upsert(index, Item(key="K-ITEMS-1", item_type="journalArticle", title="mantle hydration"), "mantle hydration")
+        _upsert(index, Item(key="K-ITEMS-2", item_type="journalArticle", title="mantle hydration"), "mantle hydration")
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key IN ('K-ITEMS-1', 'K-ITEMS-2')")  # type: ignore[attr-defined]
+
+        hits = index.search_keyword(
+            QuerySpec(text="mantle hydration", search_mode=SearchMode.KEYWORD, limit=5),
+        )
+
+        assert [hit.item.key for hit in hits[:2]] == ["K-ITEMS-1", "K-ITEMS-2"]
+    finally:
+        index.close()
+
+
+def test_fuzzy_search_reads_from_items_when_documents_row_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        _upsert(index, Item(key="F-ITEMS", item_type="journalArticle", title="tectonic inversion"), "tectonic inversion body")
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key = 'F-ITEMS'")  # type: ignore[attr-defined]
+
+        hits = index.search_fuzzy(
+            QuerySpec(text="tectonic inversion", search_mode=SearchMode.FUZZY, limit=5),
+        )
+
+        assert [hit.item.key for hit in hits] == ["F-ITEMS"]
+    finally:
+        index.close()
+
+
+def test_filter_only_search_reads_from_items_when_documents_row_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        target = Item(
+            key="FILTER-ITEMS",
+            item_type="journalArticle",
+            title="Thermodynamics with the Gruneisen parameter",
+            doi="10.1016/j.pepi.2018.10.006",
+            journal="Physics of the Earth and Planetary Interiors",
+            citation_key="staceyThermodynamicsGruneisenParameter2019",
+        )
+        _upsert(index, target, "thermodynamics gruneisen")
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key = 'FILTER-ITEMS'")  # type: ignore[attr-defined]
+
+        hits = index.search_keyword(
+            QuerySpec(
+                search_mode=SearchMode.KEYWORD,
+                doi="doi:10.1016/j.pepi.2018.10.006",
+                journal="planetary interiors",
+                citation_key="staceythermodynamicsgruneisenparameter2019",
+                limit=5,
+            )
+        )
+
+        assert [hit.item.key for hit in hits] == ["FILTER-ITEMS"]
+    finally:
+        index.close()
+
+
+def test_structured_filter_item_keys_read_from_items_when_documents_row_missing(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        target = Item(key="STRUCT-ITEMS", item_type="journalArticle", title="Hydration", doi="10.1000/struct")
+        _upsert(index, target, "hydration body")
+        with index._conn:  # type: ignore[attr-defined]
+            index._conn.execute("DELETE FROM documents WHERE item_key = 'STRUCT-ITEMS'")  # type: ignore[attr-defined]
+
+        keys = index.item_keys_for_structured_filters(
+            QuerySpec(search_mode=SearchMode.KEYWORD, doi="doi:10.1000/struct", limit=5),
+        )
+
+        assert keys == {"STRUCT-ITEMS"}
+    finally:
+        index.close()
+
+
 def test_set_item_structured_fields_updates_v2_structured_rows(tmp_path: Path) -> None:
     index = LexicalIndex(tmp_path / "lexical.sqlite3")
     try:

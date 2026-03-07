@@ -152,16 +152,16 @@ Click CLI
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
   - Transitional `items` canonical table with backfill from `documents`, dual-write on ingest, and read/hash/profile checks preferring `items`.
+  - Safe query-path cutover to `items` for index search/filter execution (`keyword`, `fuzzy`, filter-only, structured prefilter key lookup).
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
   - Optional watermark/cursor collect checkpoint flow (`paging_mode=watermark`) for adapters that provide paging tokens.
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
 - Still transitional:
-  - Search SQL still joins `documents` for compatibility until query-path cutover is validated.
-  - `documents` is still dual-written for compatibility during migration.
+  - `documents` is still dual-written and fallback-read for migration safety.
   - Legacy normalized columns in `documents` are still dual-written for compatibility.
-  - Final full `items`-first query-path cutover remains pending.
+  - Final cleanup/removal of `documents` compatibility paths remains pending.
 
 ### 5.3 Layered Index Architecture (v2)
 Separate metadata, lexical, and vector concerns:
@@ -663,8 +663,8 @@ src/zotq/
 
 ## 17. Next Milestones (Unfinished)
 1. Complete v2 schema split:
-   - Canonical metadata storage is now mirrored into `items` with compatibility reads preserved.
-   - Complete query-path cutover from `documents` joins to `items` joins where safe.
+   - Canonical metadata and safe query paths are now `items`-first with compatibility preserved.
+   - Remove `documents` dual-write/fallback compatibility paths after migration validation.
 2. Add projection/version migration controls:
    - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
    - Reporting for version mismatch counts is now available via `index inspect`.

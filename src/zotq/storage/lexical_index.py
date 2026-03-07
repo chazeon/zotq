@@ -995,7 +995,7 @@ class LexicalIndex:
         if not query.text:
             return self._search_by_filters_only(query, mode_name="keyword")
 
-        filter_where, filter_params = self._structured_filter_sql(query, table_alias="documents")
+        filter_where, filter_params = self._structured_filter_sql(query, table_alias="items")
         where_clauses = ["lexical_fts MATCH ?"]
         params: list[object] = [query.text]
         if filter_where:
@@ -1007,7 +1007,7 @@ class LexicalIndex:
             f"""
             SELECT lexical_fts.item_key, bm25(lexical_fts, 0.0, 3.0, 1.6, 1.8, 1.2, 1.0, 0.9) AS score
             FROM lexical_fts
-            JOIN documents ON documents.item_key = lexical_fts.item_key
+            JOIN items ON items.item_key = lexical_fts.item_key
             WHERE {where_sql}
             ORDER BY score
             LIMIT ?
@@ -1045,18 +1045,18 @@ class LexicalIndex:
             return self._search_by_filters_only(query, mode_name="fuzzy")
 
         target = query.text.lower()
-        filter_where, filter_params = self._structured_filter_sql(query, table_alias="documents")
+        filter_where, filter_params = self._structured_filter_sql(query, table_alias="items")
         sql = """
             SELECT
-                documents.item_json AS item_json,
-                COALESCE(lexical_docs.title, documents.title, '') AS title,
-                COALESCE(lexical_docs.body, documents.full_text, '') AS full_text
-            FROM documents
-            LEFT JOIN lexical_docs ON lexical_docs.item_key = documents.item_key
+                items.raw_json AS item_json,
+                COALESCE(lexical_docs.title, items.title, '') AS title,
+                COALESCE(lexical_docs.body, '') AS full_text
+            FROM items
+            LEFT JOIN lexical_docs ON lexical_docs.item_key = items.item_key
         """
         if filter_where:
             sql += f" WHERE {filter_where}"
-        sql += " ORDER BY documents.item_key"
+        sql += " ORDER BY items.item_key"
         rows = self._conn.execute(sql, tuple(filter_params)).fetchall()
 
         scored: list[tuple[float, bool, str, Item]] = []
@@ -1177,11 +1177,11 @@ class LexicalIndex:
         return " AND ".join(clauses), params
 
     def item_keys_for_structured_filters(self, query: QuerySpec) -> set[str] | None:
-        where_sql, params = self._structured_filter_sql(query, table_alias="documents")
+        where_sql, params = self._structured_filter_sql(query, table_alias="items")
         if not where_sql:
             return None
         rows = self._conn.execute(
-            f"SELECT item_key FROM documents WHERE {where_sql} ORDER BY item_key",
+            f"SELECT item_key FROM items WHERE {where_sql} ORDER BY item_key",
             tuple(params),
         ).fetchall()
         return {str(row["item_key"]) for row in rows}
@@ -1218,14 +1218,14 @@ class LexicalIndex:
 
     def _search_by_filters_only(self, query: QuerySpec, *, mode_name: str) -> list[SearchHit]:
         filter_where, filter_params = self._structured_filter_sql(query)
-        sql = "SELECT item_json FROM documents"
+        sql = "SELECT raw_json FROM items"
         if filter_where:
             sql += f" WHERE {filter_where}"
         sql += " ORDER BY item_key"
         rows = self._conn.execute(sql, tuple(filter_params)).fetchall()
         hits: list[SearchHit] = []
         for row in rows:
-            item = Item.model_validate_json(row["item_json"])
+            item = Item.model_validate_json(row["raw_json"])
             if not self._matches_filters(item, query):
                 continue
             score = self._attachment_penalty(item, query)
