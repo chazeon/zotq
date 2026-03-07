@@ -20,6 +20,7 @@ Tech constraints:
 - Structured output first: JSON output is stable and machine-oriented.
 - Explicit capability checks: unsupported features fail clearly or fallback explicitly.
 - Incremental by default: sync/index operations should be resumable and cheap.
+- Agentic-first operability: non-interactive execution, deterministic errors, and predictable capability gating.
 
 ## 3. Scope
 ### In scope (v1)
@@ -95,6 +96,8 @@ Click CLI
   - Uses remote/self-hosted HTTP API.
 - Optional `SnapshotSourceAdapter` (future)
   - Reads from exported snapshots or safe copies.
+  - First practical target is collaborator-provided `.bib`/BibTeX ingestion for offline access.
+  - JSON snapshot support remains preferred for full-fidelity metadata where available.
   - Must not touch live `zotero.sqlite`.
 
 ### 4.3 Object Lifecycle Per CLI Invocation
@@ -298,6 +301,9 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `--mode [local-api|remote]`
 - `--output [table|json|jsonl|bib|bibtex]`
 - `--verbose`
+- Planned for agentic workflows:
+  - `--non-interactive` (no prompts or interactive fallbacks).
+  - `--require-offline-ready` (fail early if command path would require network).
 
 ### 6.2 Command Grammar
 - Canonical form: `zotq <resource> <verb> [options]`
@@ -392,6 +398,9 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - Resolution order: `citationKey` field -> `extra` parse (`Citation Key: ...`) -> Better BibTeX JSON-RPC -> BibTeX parse.
 - `--prefer json|extra|rpc|bibtex`
   - Restricts lookup to one source only (no fallback chain).
+- BibTeX parse implementation policy (planned):
+  - Replace regex-based BibTeX key extraction with parser-backed extraction from the selected BibTeX library.
+  - Single-entry and batched-entry citation-key extraction must share the same parser path.
 - Better BibTeX RPC endpoint (optional):
   - `POST /better-bibtex/json-rpc`
   - method: `item.citationkey`
@@ -421,6 +430,7 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 ### 6.10 Batched Multi-Key Requests (Planned)
 - Goal:
   - Reduce round trips and latency for repeated read operations while keeping command grammar stable.
+  - Reduce network access-elevation churn in agentic workflows by avoiding chatty per-item call patterns.
 - Compatibility constraints:
   - Keep existing single-key forms unchanged:
     - `zotq item get KEY`
@@ -437,6 +447,7 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - Transport strategy:
   - Prefer source batch endpoints (`itemKey=K1,K2,...`) where available.
   - Fallback to per-key adapter calls when batch endpoints are unavailable.
+  - In agentic mode, expose whether a batched transport path was used.
 - Testing requirements (test-first):
   - Backward compatibility for single-key forms.
   - Deterministic output order matching input key order.
@@ -607,6 +618,7 @@ src/zotq/
   - `pydantic`
   - `rich` (table output)
 - Optional:
+  - BibTeX parser/serializer library for snapshot mode (`parse` + canonical `stringify`).
   - PDF/text extraction libraries
   - external embedding provider-specific dependencies (if using non-REST SDKs)
 
@@ -620,6 +632,10 @@ src/zotq/
   - `ExtractionError`
 - Non-zero exit codes for command failure.
 - `--verbose` includes stack/debug context.
+- Agentic behavior requirements (planned):
+  - Stable machine-readable error codes in JSON/JSONL outputs.
+  - Deterministic failure classes for precondition, capability, network, and data-shape errors.
+  - No interactive recovery prompts when `--non-interactive` is enabled.
 
 ## 12. Testing Strategy
 
@@ -637,6 +653,10 @@ src/zotq/
 
 ### 12.3 Contract tests
 - Shared adapter contract (`health/search/get/list/index`) across modes.
+- Snapshot contract parity tests (planned):
+  - `.bib`-backed read/search behavior with explicit degraded capabilities.
+  - Citation-key and DOI normalization parity with other modes.
+  - Deterministic behavior with missing/partial BibTeX fields.
 
 ## 13. Implementation Phases
 1. Scaffold project and CLI skeleton.
@@ -653,7 +673,7 @@ src/zotq/
 - Source API differences (local vs remote): normalize in adapters.
 - Extraction quality variance across PDFs: keep extractor pluggable and preserve traceable metadata.
 - Index drift/staleness: incremental checkpoints + explicit rebuild command.
-- Semantic search quality/cost: provider abstraction + optional local embeddings.
+- Semantic search quality/cost: provider abstraction + required portable local embedding baseline for offline query paths.
 - Capability mismatch across modes: explicit capability probing and deterministic fallback rules.
 
 ## 15. Future Considerations (Post-v1)
@@ -682,6 +702,7 @@ src/zotq/
 - `keyword` and `fuzzy` search work with indexed content.
 - `semantic` and `hybrid` work when vector indexing is enabled.
 - Built-in `local` embedding provider works without extra runtime dependencies.
+- At least one portable local embedding path supports semantic/hybrid query execution without network access.
 - External providers (`openai`/`ollama`/`gemini`) are configurable via `IndexConfig`.
 - Unsupported modes fail clearly or fallback only when explicitly enabled.
 - `index status/inspect/sync/rebuild/enrich` provide actionable output.
@@ -705,3 +726,160 @@ src/zotq/
 5. Post-v1 feature roadmap:
    - Introduce low-risk mutation commands (`collection add-item/remove-item`, `tag add/remove`) with `--dry-run`/`--yes`.
    - Keep MCP integration as separate phase after CLI contracts stabilize.
+
+## 18. Unified Priority + Findings (Execution-Critical)
+This section fuses the execution plan and technical findings into one priority model.
+Execution rule:
+1. Lock contract/models.
+2. Add tests.
+3. Implement.
+
+### 18.1 Re-evaluated Priority Order
+Priority 0: Retrieval overhead reduction (immediate pain point)
+1. Add multi-key reads (`item get --key`, `item citekey --key`) with batch-first transport.
+2. Add explicit transport telemetry (`batch_used`, `fallback_loop`) for agentic runs.
+3. Keep command grammar stable (`zotq <resource> <verb> [options]`).
+
+Priority 1: Vector retrieval backend cutover
+1. Keep current Python cosine path as fallback.
+2. Introduce backend abstraction (`python` vs `sqlite-vec`) and benchmark parity.
+3. Standardize on `sqlite-vec` as the single extension backend (no dual-extension production matrix).
+
+Priority 2: Portable local semantic/hybrid path
+1. Require local embedding provider path for offline-ready profiles.
+2. Add query-time guards for remote-only embedding dependency.
+3. Preserve deterministic fallback/fail-fast policy.
+
+Priority 3: Snapshot/offline source usability
+1. Add `snapshot` mode and `BibtexSnapshotSourceAdapter`.
+2. Add parser/serializer-backed BibTeX handling (including replacing regex citation-key extraction path).
+
+Priority 4: Full-text and chunk-scale foundations
+1. Add chunk traceability and provenance schema.
+2. Add extractor increments and ANN scale path.
+
+### 18.2 Key Technical Findings Driving Order
+1. Item fan-out is multiplicative:
+   - `chunks_per_item = sum(k_i)` across indexed sources/fields.
+   - Vector rows therefore scale with chunk fan-out.
+2. Current cosine path is Python full scan (`O(N*d)`), which makes retrieval latency the first bottleneck at scale.
+3. SQLite core stores vectors but does not provide ANN acceleration without extensions.
+4. Environment findings (March 7, 2026):
+   - Extension loading is available.
+   - `sqlite-vec` and `sqlite-vss` resolve.
+   - `sqlite-vector` does not resolve for this macOS arm64 environment.
+5. Role split must remain explicit:
+   - embed engine (for example `fastembed`) generates vectors.
+   - `sqlite-vec` indexes/searches vectors.
+
+### 18.3 Data Model and Retrieval Constraints
+Current support:
+1. `item -> fields` one-to-many (`item_fields`, `ordinal`).
+2. `item -> chunks` one-to-many (`chunks`).
+3. `item -> vectors` chunk-granular one-to-many (`vectors`).
+
+Current gaps:
+1. Missing chunk source/provenance metadata (`source_type`, `source_id`, offsets, extractor version/hash).
+2. Missing explicit multi-profile vector identity in rows (`profile_id`-class field).
+3. No ANN index path in current runtime.
+
+Mandatory retrieval-profile alignment:
+1. Lock profile by `model/provider`, dimension/truncation, dtype (`float`/`int8`/`bit`), normalization/quantization rules, and profile version.
+2. Query-time transform must match index-time transform exactly.
+3. Cross-profile retrieval mismatch must fail fast (or explicit fallback when configured).
+
+### 18.4 Agentic Requirements (Mandatory)
+1. Non-interactive execution.
+2. Preflight capability/status output:
+   - `offline_ready`
+   - `requires_network_for_query`
+   - `embedding_provider_local`
+   - `degraded_capabilities`
+3. Deterministic JSON/JSONL error envelope.
+4. `--require-offline-ready` guard for automation.
+
+### 18.5 Migration and Cutover Policy
+1. Lexical schema does not need movement for vector-backend cutover.
+2. Vector rows require one-time extension-compatible backfill/migration.
+3. Re-embedding is not mandatory when model/dimension/profile remains compatible.
+4. Keep Python fallback until ANN parity tests pass.
+5. Do not run `sqlite-vec` and `sqlite-vss` together in production profiles.
+
+## 19. Step-by-Step Execution Plan
+This section is an implementation runbook derived from section 18 priorities.
+Execution tracking for this runbook is maintained in `TODO.md` (ticket IDs `T0.x`-`T5.x`).
+
+### 19.1 Step 0: Contracts and Benchmarks
+1. Add config contracts for:
+   - multi-key read output envelope
+   - vector backend selector (`python|sqlite-vec`)
+   - profile alignment/version fields
+2. Add retrieval benchmark harness and stage timing.
+
+### 19.2 Step 1: Retrieval Overhead First
+1. Implement `item get --key` and `item citekey --key`.
+2. Use batch transport where available; explicit fallback loop otherwise.
+3. Add deterministic per-key partial-failure contract.
+
+Tests:
+1. `tests/test_item_multi_key.py`
+2. `tests/test_cli_contract_model.py` updates
+3. `tests/test_bibliography_batching.py`/`tests/test_citation_key_resolution.py` extensions
+
+### 19.3 Step 2: Parser-backed BibTeX Path
+1. Add BibTeX parser/serializer dependency.
+2. Replace regex citation-key extraction helpers with parser-backed extraction.
+3. Add stable stringify policy for offline output.
+
+Tests:
+1. `tests/test_citation_key_resolution.py` parser-backed single/batch cases
+2. BibTeX parse/stringify round-trip tests
+
+### 19.4 Step 3: SQLite-vec Backend Introduction
+1. Add vector-backend abstraction in storage layer.
+2. Implement `sqlite-vec` backend path with fallback to current Python scan.
+3. Add migration/backfill command path and compatibility checks.
+
+Tests:
+1. Backend parity tests on sampled queries.
+2. Migration tests from legacy vector table to extension-backed index path.
+
+### 19.5 Step 4: Portable Local Embeddings + Offline Guards
+1. Add required local embedding profile path (`fastembed`-class + local-hash fallback).
+2. Add remote-dependency guardrails for semantic/hybrid query path.
+3. Surface preflight readiness fields for agents.
+
+Tests:
+1. `tests/test_semantic_offline_guards.py`
+2. `tests/test_agentic_preflight.py`
+3. `tests/test_agentic_non_interactive.py`
+4. `tests/test_agentic_error_envelope.py`
+
+### 19.6 Step 5: Snapshot Mode
+1. Add `snapshot` mode/config and `BibtexSnapshotSourceAdapter`.
+2. Preserve degraded capability semantics explicitly.
+3. Keep deterministic source/index routing behavior.
+
+Tests:
+1. `tests/test_snapshot_mode_config.py`
+2. `tests/test_snapshot_bibtex_adapter.py`
+3. `tests/test_snapshot_mode_contract.py`
+
+### 19.7 Step 6: Full-text Traceability Foundations
+1. Add chunk provenance fields:
+   - `source_type`, `source_id`
+   - `extractor`, `extractor_version`
+   - `source_content_hash`
+   - `char_start`, `char_end`
+2. Add extractor increments behind safe fallbacks.
+
+Tests:
+1. `tests/test_chunk_provenance.py`
+2. `tests/test_extractors.py`
+
+### 19.8 Final Acceptance Gates
+1. Retrieval overhead is reduced via multi-key batching and explicit fallback telemetry.
+2. Offline-ready profiles execute semantic/hybrid without network.
+3. `sqlite-vec` backend passes parity and migration checks with Python fallback retained until stable.
+4. Snapshot `.bib` workflows are deterministic and parser-backed.
+5. Chunked full-text rows are source-traceable and migration-safe.
