@@ -156,6 +156,7 @@ Search hit tables include `Journal` and `DOI` columns when available.
 - `hybrid`: weighted lexical + vector fusion (`--alpha`) using per-query score normalization.
 
 `semantic` and `hybrid` require a ready local index (`index sync` or `index rebuild`).
+When the active embedding provider is remote-dependent (for example `openai`), index semantic/hybrid capability is guarded off for offline-safe runs; enable `--allow-fallback` to downgrade to keyword mode.
 
 ## Indexing Workflow
 Build or refresh index from the active backend:

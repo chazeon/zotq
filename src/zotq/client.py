@@ -642,12 +642,16 @@ class ZotQueryClient:
     def index_inspect(self, *, sample_limit: int = 5) -> dict[str, object]:
         return self._index.inspect_index(sample_limit=sample_limit)
 
+    @staticmethod
+    def _is_local_query_embedding_provider(provider: str | None) -> bool:
+        normalized = (provider or "").strip().lower()
+        return normalized in {"local", "portable", "local-portable", "fastembed"}
+
     def index_preflight(self) -> dict[str, object]:
         status = self._index.status()
         inspect = self._index.inspect_index(sample_limit=0)
 
-        provider = (self._profile.index.embedding_provider or "local").strip().lower()
-        embedding_provider_local = provider == "local"
+        embedding_provider_local = self._is_local_query_embedding_provider(self._profile.index.embedding_provider)
         requires_network_for_query = not embedding_provider_local
 
         degraded: list[str] = []

@@ -136,14 +136,23 @@ class MockIndexService:
             last_sync_at=self._last_sync_at(),
         )
 
+    @staticmethod
+    def _is_local_query_embedding_provider(provider: str | None) -> bool:
+        normalized = (provider or "").strip().lower()
+        return normalized in {"local", "portable", "local-portable", "fastembed"}
+
+    def _requires_network_for_query(self) -> bool:
+        return not self._is_local_query_embedding_provider(self._config.embedding_provider)
+
     def capabilities(self) -> BackendCapabilities:
         lexical_ready = bool(self._config.enabled and self._lexical.document_count() > 0)
         vector_ready = bool(self._config.enabled and self._vector.chunk_count() > 0)
+        semantic_ready = lexical_ready and vector_ready and not self._requires_network_for_query()
         return BackendCapabilities(
             keyword=lexical_ready,
             fuzzy=lexical_ready,
-            semantic=lexical_ready and vector_ready,
-            hybrid=lexical_ready and vector_ready,
+            semantic=semantic_ready,
+            hybrid=semantic_ready,
             index_status=True,
             index_sync=True,
             index_rebuild=True,
