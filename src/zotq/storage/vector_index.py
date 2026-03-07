@@ -36,6 +36,8 @@ class _VectorIndexBackend(Protocol):
         allowed_item_keys: set[str] | None = None,
     ) -> list[tuple[str, float]]: ...
 
+    def migration_report(self) -> dict[str, object]: ...
+
     def close(self) -> None: ...
 
 
@@ -203,6 +205,14 @@ class _PythonVectorIndex:
     def close(self) -> None:
         self._conn.close()
 
+    def migration_report(self) -> dict[str, object]:
+        return {
+            "backend": VectorBackend.PYTHON.value,
+            "performed": False,
+            "legacy_rows": 0,
+            "migrated_rows": 0,
+        }
+
 
 class _SqliteVecVectorIndex:
     """sqlite-vec accelerated backend."""
@@ -217,9 +227,16 @@ class _SqliteVecVectorIndex:
         self._conn.row_factory = sqlite3.Row
         self._conn.enable_load_extension(True)
         sqlite_vec.load(self._conn)
+        self._migration: dict[str, object] = {
+            "backend": VectorBackend.SQLITE_VEC.value,
+            "performed": False,
+            "legacy_rows": 0,
+            "migrated_rows": 0,
+        }
         self._init_meta()
+        self._migrate_legacy_python_rows_if_needed()
         expected = self._expected_dim()
-        if expected is not None:
+        if expected is not None and not self._table_exists("vectors"):
             self._ensure_vectors_table(expected)
 
     def _init_meta(self) -> None:
@@ -234,11 +251,16 @@ class _SqliteVecVectorIndex:
             """
         )
 
-    def _table_exists(self) -> bool:
+    def _table_exists(self, name: str = "vectors") -> bool:
         row = self._conn.execute(
-            "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'vectors'"
+            "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
         ).fetchone()
         return row is not None
+
+    def _table_columns(self, name: str) -> list[str]:
+        rows = self._conn.execute(f"PRAGMA table_info({name})").fetchall()
+        return [str(row["name"]) for row in rows]
 
     def _expected_dim(self) -> int | None:
         row = self._conn.execute("SELECT value FROM vector_meta WHERE key = 'dimension'").fetchone()
@@ -259,8 +281,71 @@ class _SqliteVecVectorIndex:
             (str(dim),),
         )
 
+    def _is_legacy_python_vectors_table(self) -> bool:
+        if not self._table_exists("vectors"):
+            return False
+        columns = set(self._table_columns("vectors"))
+        return {"chunk_id", "item_key", "ordinal", "embedding_json", "norm"}.issubset(columns)
+
+    def _parse_legacy_rows(self) -> tuple[list[tuple[str, str, int, list[float]]], int | None]:
+        rows = self._conn.execute(
+            "SELECT chunk_id, item_key, ordinal, embedding_json FROM vectors ORDER BY item_key, ordinal"
+        ).fetchall()
+        parsed: list[tuple[str, str, int, list[float]]] = []
+        dim: int | None = None
+        for row in rows:
+            chunk_id = str(row["chunk_id"])
+            item_key = str(row["item_key"])
+            ordinal = int(row["ordinal"])
+            try:
+                raw_embedding = json.loads(str(row["embedding_json"]))
+            except json.JSONDecodeError as exc:
+                raise ValueError("Legacy vector row contains invalid embedding_json.") from exc
+            if not isinstance(raw_embedding, list) or not raw_embedding:
+                raise ValueError("Legacy vector row contains an empty or non-list embedding.")
+            embedding = [float(value) for value in raw_embedding]
+            if dim is None:
+                dim = len(embedding)
+            elif len(embedding) != dim:
+                raise ValueError(f"Legacy vector dimension mismatch: expected {dim}, got {len(embedding)}.")
+            parsed.append((chunk_id, item_key, ordinal, embedding))
+        return parsed, dim
+
+    def _migrate_legacy_python_rows_if_needed(self) -> None:
+        if not self._is_legacy_python_vectors_table():
+            return
+
+        parsed_rows, detected_dim = self._parse_legacy_rows()
+        legacy_rows = len(parsed_rows)
+        self._migration["legacy_rows"] = legacy_rows
+
+        expected_dim = self._expected_dim()
+        if expected_dim is not None and detected_dim is not None and expected_dim != detected_dim:
+            raise ValueError(f"Legacy vector dimension mismatch: expected {expected_dim}, got {detected_dim}.")
+        if detected_dim is None:
+            detected_dim = expected_dim
+
+        with self._conn:
+            if self._table_exists("vectors_legacy_python"):
+                self._conn.execute("DROP TABLE vectors_legacy_python")
+            self._conn.execute("ALTER TABLE vectors RENAME TO vectors_legacy_python")
+
+            if detected_dim is not None:
+                self._set_expected_dim(detected_dim)
+                self._ensure_vectors_table(detected_dim)
+                for chunk_id, item_key, ordinal, embedding in parsed_rows:
+                    self._conn.execute(
+                        "INSERT INTO vectors(chunk_id, embedding, item_key, ordinal) VALUES (?, ?, ?, ?)",
+                        (chunk_id, json.dumps(embedding), item_key, ordinal),
+                    )
+
+            self._conn.execute("DROP TABLE vectors_legacy_python")
+
+        self._migration["performed"] = True
+        self._migration["migrated_rows"] = legacy_rows
+
     def _ensure_vectors_table(self, dim: int) -> None:
-        if self._table_exists():
+        if self._table_exists("vectors"):
             return
         self._conn.execute(
             f"""
@@ -275,7 +360,7 @@ class _SqliteVecVectorIndex:
 
     def upsert_item(self, item_key: str, vectors: list[VectorRecord]) -> None:
         if not vectors:
-            if self._table_exists():
+            if self._table_exists("vectors"):
                 with self._conn:
                     self._conn.execute("DELETE FROM vectors WHERE item_key = ?", (item_key,))
             return
@@ -306,24 +391,24 @@ class _SqliteVecVectorIndex:
 
     def clear(self) -> None:
         with self._conn:
-            if self._table_exists():
+            if self._table_exists("vectors"):
                 self._conn.execute("DROP TABLE vectors")
             self._conn.execute("DELETE FROM vector_meta")
 
     def document_count(self) -> int:
-        if not self._table_exists():
+        if not self._table_exists("vectors"):
             return 0
         row = self._conn.execute("SELECT COUNT(DISTINCT item_key) AS c FROM vectors").fetchone()
         return int(row["c"]) if row else 0
 
     def chunk_count(self) -> int:
-        if not self._table_exists():
+        if not self._table_exists("vectors"):
             return 0
         row = self._conn.execute("SELECT COUNT(*) AS c FROM vectors").fetchone()
         return int(row["c"]) if row else 0
 
     def has_item(self, item_key: str) -> bool:
-        if not self._table_exists():
+        if not self._table_exists("vectors"):
             return False
         row = self._conn.execute(
             "SELECT COUNT(*) AS c FROM vectors WHERE item_key = ?",
@@ -341,7 +426,7 @@ class _SqliteVecVectorIndex:
     ) -> list[tuple[str, float]]:
         if not query_vector or limit <= 0:
             return []
-        if not self._table_exists():
+        if not self._table_exists("vectors"):
             return []
 
         expected_dim = self._expected_dim()
@@ -381,6 +466,9 @@ class _SqliteVecVectorIndex:
 
     def close(self) -> None:
         self._conn.close()
+
+    def migration_report(self) -> dict[str, object]:
+        return dict(self._migration)
 
 
 class VectorIndex:
@@ -424,3 +512,6 @@ class VectorIndex:
 
     def close(self) -> None:
         self._backend.close()
+
+    def migration_report(self) -> dict[str, object]:
+        return self._backend.migration_report()

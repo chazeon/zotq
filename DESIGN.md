@@ -162,6 +162,7 @@ Click CLI
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
+  - `sqlite-vec` backend migration/backfill path for legacy Python vector rows with compatibility checks.
 - Compatibility note:
   - Legacy document-schema importer has been retired.
   - Pre-cutover index files that only contain legacy `documents` rows must be rebuilt (`zotq index rebuild`).

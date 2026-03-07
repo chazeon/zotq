@@ -110,6 +110,7 @@ class MockIndexService:
         self._embedding = build_embedding_provider(config)
         self._lexical = LexicalIndex(self._index_dir / "lexical.sqlite3")
         self._vector = VectorIndex(self._index_dir / "vector.sqlite3", backend=config.vector_backend)
+        self._vector_migration = self._vector.migration_report()
         self._checkpoints = CheckpointStore(self._index_dir / "checkpoints.json")
 
     def _last_sync_at(self) -> datetime | None:
@@ -531,6 +532,8 @@ class MockIndexService:
             "documents": lexical.get("documents", 0),
             "chunks": self._lexical.chunk_count(),
             "vectors": self._vector.chunk_count(),
+            "vector_backend": self._config.vector_backend.value,
+            "vector_migration": self._vector_migration,
             "fields": lexical.get("fields", {}),
         }
         profiles = lexical.get("profiles")
