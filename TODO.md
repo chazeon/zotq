@@ -16,7 +16,7 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S9` (`done`) Execute `T3.3`: preflight readiness output for vector backend state.
 - [x] `S10` (`done`) Execute `T4.1`: portable local embedding provider path with explicit fallback.
 - [x] `S11` (`done`) Execute `T4.2`: semantic/hybrid remote-dependency query guards.
-- [ ] `S12` (`in_progress`) Start `T4.3`: agentic structured error envelope + non-interactive behavior.
+- [x] `S12` (`done`) Execute `T4.3`: agentic structured error envelope + non-interactive behavior.
 
 ## P0 Contracts and Benchmarks
 
@@ -84,7 +84,7 @@ Status values: `todo`, `in_progress`, `done`.
   - Files: `src/zotq/index_service.py`, `src/zotq/client.py`.
   - Tests: `tests/test_semantic_offline_guards.py`.
 
-- [ ] `T4.3` (`in_progress`) Add agentic structured error envelope and non-interactive behavior.
+- [x] `T4.3` (`done`) Add agentic structured error envelope and non-interactive behavior.
   - Files: `src/zotq/cli.py`, `src/zotq/errors.py`, `src/zotq/output.py`.
   - Tests: `tests/test_agentic_non_interactive.py`, `tests/test_agentic_error_envelope.py`.
 

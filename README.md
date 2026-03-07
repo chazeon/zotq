@@ -148,6 +148,8 @@ uv run zotq item get ABCD1234
 Search hit tables include `Journal` and `DOI` columns when available.
 `--output bib` renders formatted CSL bibliography output from Zotero (`format=bib`, typically HTML-like snippets) and supports `--style`, `--locale`, and `--linkwrap`.
 `--output bibtex` renders BibTeX entries (`format=bibtex`).
+`--non-interactive` disables interactive recovery/fallback prompts for automation.
+`--require-offline-ready` fails semantic/hybrid queries early when preflight is not offline-ready.
 
 ## Search Modes
 - `keyword`: SQLite FTS5 lexical ranking over a field-aware projection (`title`, `abstract`, `journal`, `creators`, `tags`, `body`).
@@ -192,6 +194,19 @@ When an adapter exposes watermark/cursor paging, `zotq` uses that checkpoint pat
 It also reports lexical/vector profile-version mismatch counts and sample mismatched item keys against the configured `lexical_profile_version` and `vector_profile_version` targets.
 For vector backend cutovers, `index inspect` includes `vector_backend` and `vector_migration` summary fields (legacy rows detected/migrated).
 `index status` includes a `preflight` block for agentic runs with `offline_ready`, `requires_network_for_query`, `embedding_provider_local`, `vector_backend`, and `degraded_capabilities`.
+`index status` also includes an `agentic` block with `non_interactive` and `require_offline_ready` runtime flags.
+For `--output json`/`--output jsonl`, CLI failures use a deterministic envelope:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "mode_not_supported",
+    "message": "...",
+    "details": {}
+  }
+}
+```
 
 ### Migration Status
 - Current status: migration cutover complete; runtime is `items`-only.

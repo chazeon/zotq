@@ -302,9 +302,8 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `--mode [local-api|remote]`
 - `--output [table|json|jsonl|bib|bibtex]`
 - `--verbose`
-- Planned for agentic workflows:
-  - `--non-interactive` (no prompts or interactive fallbacks).
-  - `--require-offline-ready` (fail early if command path would require network).
+- `--non-interactive` (no prompts or interactive fallbacks).
+- `--require-offline-ready` (fail early if command path would require network).
 
 ### 6.2 Command Grammar
 - Canonical form: `zotq <resource> <verb> [options]`
@@ -358,6 +357,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 ### 6.5 Index Command Semantics
 - `index status`
   - Reports index readiness, counts, last sync timestamp, embedding model.
+  - Includes agentic preflight (`offline_ready`, `degraded_capabilities`, vector backend state) and runtime flag state (`non_interactive`, `require_offline_ready`).
 - `index inspect`
   - Reports structured field coverage/missingness and sample item keys for gaps.
   - Reports lexical/vector profile-version mismatch counts and sample mismatched item keys against configured targets.
@@ -651,9 +651,10 @@ src/zotq/
   - `ExtractionError`
 - Non-zero exit codes for command failure.
 - `--verbose` includes stack/debug context.
-- Agentic behavior requirements (planned):
+- Agentic behavior:
   - Stable machine-readable error codes in JSON/JSONL outputs.
-  - Deterministic failure classes for precondition, capability, network, and data-shape errors.
+  - Deterministic envelope shape: `{ ok: false, error: { code, message, details } }`.
+  - Deterministic failure classes for capability, network, precondition, and usage errors.
   - No interactive recovery prompts when `--non-interactive` is enabled.
 
 ## 12. Testing Strategy

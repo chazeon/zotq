@@ -152,6 +152,22 @@ def _render_table(payload: Any) -> str:
     return _stringify(payload)
 
 
+def build_error_envelope(
+    *,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details or {},
+        },
+    }
+
+
 def render_payload(payload: Any, output_format: OutputFormat) -> str:
     if output_format == OutputFormat.BIB:
         if isinstance(payload, str):

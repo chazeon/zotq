@@ -10,10 +10,10 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from .client import ZotQueryClient
 from .config import apply_cli_overrides, load_app_config
 from .contracts import build_cli_api_contract
-from .errors import BackendConnectionError, ConfigError, IndexNotReadyError, ModeNotSupportedError
+from .errors import BackendConnectionError, ConfigError, ErrorCode, IndexNotReadyError, ModeNotSupportedError, classify_error
 from .index_service import RetrievalBenchmarkHarness
 from .models import AppConfig, Mode, OutputFormat, QuerySpec, SearchBackend, SearchDefaultsConfig, SearchMode, SearchResult
-from .output import render_payload
+from .output import build_error_envelope, render_payload
 
 
 @dataclass
@@ -23,9 +23,27 @@ class RuntimeContext:
     output: OutputFormat
     search_defaults: SearchDefaultsConfig
     verbose: bool
+    non_interactive: bool = False
+    require_offline_ready: bool = False
 
 
 pass_runtime = click.make_pass_decorator(RuntimeContext)
+
+
+def _raise_cli_error(
+    runtime: RuntimeContext,
+    *,
+    code: ErrorCode | str,
+    message: str,
+    details: dict[str, object] | None = None,
+    exit_code: int = 2,
+) -> None:
+    if runtime.output in {OutputFormat.JSON, OutputFormat.JSONL}:
+        code_value = code.value if isinstance(code, ErrorCode) else str(code)
+        envelope = build_error_envelope(code=code_value, message=message, details=details)
+        click.echo(render_payload(envelope, runtime.output))
+        raise SystemExit(exit_code)
+    raise click.ClickException(message)
 
 
 def _attachment_penalty(item_type: str | None, query: QuerySpec) -> float:
@@ -165,8 +183,31 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn, *, show_p
     help="Output format override.",
 )
 @click.option("verbose", "--verbose", is_flag=True, default=False, help="Enable verbose output.")
+@click.option(
+    "non_interactive",
+    "--non-interactive",
+    is_flag=True,
+    default=False,
+    help="Disable interactive prompts/fallbacks for agentic runs.",
+)
+@click.option(
+    "require_offline_ready",
+    "--require-offline-ready",
+    is_flag=True,
+    default=False,
+    help="Fail early when semantic/hybrid path is not offline-ready.",
+)
 @click.pass_context
-def main(ctx: click.Context, config_path: str | None, profile: str | None, mode: str | None, output: str | None, verbose: bool) -> None:
+def main(
+    ctx: click.Context,
+    config_path: str | None,
+    profile: str | None,
+    mode: str | None,
+    output: str | None,
+    verbose: bool,
+    non_interactive: bool,
+    require_offline_ready: bool,
+) -> None:
     """zotq CLI."""
     try:
         config = load_app_config(config_path=config_path)
@@ -187,6 +228,8 @@ def main(ctx: click.Context, config_path: str | None, profile: str | None, mode:
         output=selected_profile.output,
         search_defaults=selected_profile.search,
         verbose=verbose,
+        non_interactive=non_interactive,
+        require_offline_ready=require_offline_ready,
     )
     ctx.call_on_close(client.close)
 
@@ -273,9 +316,17 @@ def search_run(
     offset: int,
 ) -> None:
     if query and text and query != text:
-        raise click.ClickException("Pass either QUERY or --text, or use the same value.")
+        _raise_cli_error(
+            runtime,
+            code="query_conflict",
+            message="Pass either QUERY or --text, or use the same value.",
+        )
     if runtime.output == OutputFormat.BIBTEX and (style or locale or linkwrap is not None):
-        raise click.ClickException("--style/--locale/--linkwrap are only supported with --output bib.")
+        _raise_cli_error(
+            runtime,
+            code="invalid_bibtex_flags",
+            message="--style/--locale/--linkwrap are only supported with --output bib.",
+        )
 
     defaults = runtime.search_defaults
 
@@ -303,10 +354,20 @@ def search_run(
         offset=offset,
     )
 
+    if runtime.require_offline_ready and query_spec.search_mode in {SearchMode.SEMANTIC, SearchMode.HYBRID}:
+        preflight = runtime.client.index_preflight()
+        if not bool(preflight.get("offline_ready")):
+            _raise_cli_error(
+                runtime,
+                code="require_offline_ready",
+                message="Offline-ready requirement failed for semantic/hybrid query.",
+                details={"preflight": preflight},
+            )
+
     try:
         result = runtime.client.search(query_spec)
-    except (ModeNotSupportedError, BackendConnectionError, IndexNotReadyError) as exc:
-        raise click.ClickException(str(exc)) from exc
+    except (ModeNotSupportedError, BackendConnectionError, IndexNotReadyError, ValueError) as exc:
+        _raise_cli_error(runtime, code=classify_error(exc), message=str(exc))
 
     if runtime.output == OutputFormat.BIB:
         keys = [hit.item.key for hit in result.hits]
@@ -502,8 +563,12 @@ def index_status(runtime: RuntimeContext) -> None:
     try:
         payload = runtime.client.index_status().model_dump(mode="json")
         payload["preflight"] = runtime.client.index_preflight()
+        payload["agentic"] = {
+            "non_interactive": runtime.non_interactive,
+            "require_offline_ready": runtime.require_offline_ready,
+        }
     except BackendConnectionError as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_cli_error(runtime, code=classify_error(exc), message=str(exc))
     click.echo(render_payload(payload, runtime.output))
 
 
@@ -530,7 +595,11 @@ def index_inspect(runtime: RuntimeContext, sample_limit: int) -> None:
 @pass_runtime
 def index_sync(runtime: RuntimeContext, full: bool, profiles_only: bool, show_progress: bool) -> None:
     if full and profiles_only:
-        raise click.ClickException("--profiles-only cannot be combined with --full.")
+        _raise_cli_error(
+            runtime,
+            code="invalid_option_combination",
+            message="--profiles-only cannot be combined with --full.",
+        )
     try:
         status_obj, benchmark = _run_with_index_progress(
             runtime,
@@ -540,7 +609,7 @@ def index_sync(runtime: RuntimeContext, full: bool, profiles_only: bool, show_pr
         )
         status = status_obj.model_dump(mode="json")
     except (BackendConnectionError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        _raise_cli_error(runtime, code=classify_error(exc), message=str(exc))
     payload = {"action": "sync", "full": full, "profiles_only": profiles_only, "status": status, "benchmark": benchmark}
     click.echo(render_payload(payload, runtime.output))
 
