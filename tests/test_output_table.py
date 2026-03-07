@@ -18,6 +18,8 @@ def test_table_render_search_payload() -> None:
                     "item_type": "journalArticle",
                     "title": "Mantle hydration",
                     "date": "2015",
+                    "journal": "Geophysical Journal International",
+                    "doi": "10.1093/gji/ggv123",
                 },
                 "score": 0.99,
                 "score_breakdown": {"hybrid": 0.99},
@@ -28,6 +30,8 @@ def test_table_render_search_payload() -> None:
                     "item_type": "journalArticle",
                     "title": "Limited Mantle Hydration by Bending Faults",
                     "date": "2021",
+                    "journal": "Nature Geoscience",
+                    "doi": "10.1038/ng.1234",
                 },
                 "score": 0.85,
                 "score_breakdown": {"hybrid": 0.85},
@@ -40,6 +44,11 @@ def test_table_render_search_payload() -> None:
     assert "Rank" in rendered
     assert "MI26RYRR" in rendered
     assert "Mantle hydration" in rendered
+    assert "Journal" in rendered
+    assert "DOI" in rendered
+    assert "Geophysical" in rendered
+    assert "International" in rendered
+    assert "10.1093/gji/ggv123" in rendered
 
 
 def test_table_render_list_of_objects() -> None:

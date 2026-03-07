@@ -178,3 +178,37 @@ def test_semantic_downranks_attachments_by_default(tmp_path: Path) -> None:
         assert hits[0].score > hits[1].score
     finally:
         service.close()
+
+
+def test_semantic_no_attachments_excludes_attachment_hits(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    try:
+        items = [
+            Item(
+                key="ARTICLE",
+                item_type="journalArticle",
+                title="mantle hydration",
+                abstract="mantle hydration",
+            ),
+            Item(
+                key="ATTACH",
+                item_type="attachment",
+                title="mantle hydration.pdf",
+                abstract="mantle hydration",
+            ),
+        ]
+        service.sync(full=True, items=items)
+
+        hits = service.search(
+            QuerySpec(
+                text="mantle hydration",
+                search_mode=SearchMode.SEMANTIC,
+                include_attachments=False,
+                limit=2,
+                offset=0,
+            ),
+        )
+
+        assert [hit.item.key for hit in hits] == ["ARTICLE"]
+    finally:
+        service.close()

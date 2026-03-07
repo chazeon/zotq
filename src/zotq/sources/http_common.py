@@ -219,6 +219,8 @@ def item_matches_filters(item: Item, query: QuerySpec) -> bool:
 
     if query.item_type and item.item_type != query.item_type:
         return False
+    if not query.include_attachments and not query.item_type and safe_lower(item.item_type) == "attachment":
+        return False
 
     if query.tags:
         item_tags = {t.lower() for t in item.tags}

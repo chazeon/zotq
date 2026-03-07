@@ -136,6 +136,7 @@ Click CLI
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
 - DOI filtering is normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
 - Citation-key filtering is case-insensitive and also uses `extra` fallback parsing (`Citation Key: ...`) when `citationKey` is absent.
+- Search result attachment visibility can be controlled with `--attachments/--no-attachments` (attachments included by default; `--no-attachments` excludes `item_type=attachment` unless explicitly requested via `--item-type attachment`).
 - Sync-time citation key enrichment is best-effort: batch Better BibTeX RPC lookup first, then batch BibTeX parse fallback.
 
 ### 5.2 v2 Goals
@@ -332,6 +333,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `--tag` (repeatable)
 - `--collection`
 - `--item-type`
+- `--attachments/--no-attachments`
 - `--year-from`
 - `--year-to`
 - `--alpha` (hybrid fusion weight)

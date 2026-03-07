@@ -139,6 +139,7 @@ uv run zotq item get ABCD1234
 ```
 
 `--output table` now renders rich terminal tables (search summary/hits and debug sections).
+Search hit tables include `Journal` and `DOI` columns when available.
 `--output bib` renders formatted CSL bibliography output from Zotero (`format=bib`, typically HTML-like snippets) and supports `--style`, `--locale`, and `--linkwrap`.
 `--output bibtex` renders BibTeX entries (`format=bibtex`).
 
@@ -231,6 +232,8 @@ uv run zotq --mode local-api --output json search run \
 ```
 
 `--bibkey` and `--citekey` are aliases for `--citation-key`.
+Use `--no-attachments` to exclude `item_type=attachment` rows from search results.
+Use `--attachments` to keep attachment rows in the result set.
 
 Search backend selection:
 

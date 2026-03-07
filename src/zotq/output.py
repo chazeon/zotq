@@ -83,6 +83,8 @@ def _render_search_payload(payload: dict[str, Any]) -> str:
     hits_table.add_column("Key")
     hits_table.add_column("Type")
     hits_table.add_column("Date")
+    hits_table.add_column("Journal")
+    hits_table.add_column("DOI")
     hits_table.add_column("Score")
     hits_table.add_column("Title")
 
@@ -103,6 +105,8 @@ def _render_search_payload(payload: dict[str, Any]) -> str:
                 _stringify(item_dict.get("key")),
                 _stringify(item_dict.get("item_type")),
                 _stringify(item_dict.get("date")),
+                _stringify(item_dict.get("journal")),
+                _stringify(item_dict.get("doi")),
                 score_text,
                 _stringify(item_dict.get("title")),
             )

@@ -118,6 +118,107 @@ def test_search_run_returns_hits_from_mock_adapter() -> None:
 
 
 @respx.mock
+def test_search_run_no_attachments_excludes_attachment_hits() -> None:
+    respx.get("http://remote.test/users/0/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "ARTICLE1",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Mantle hydration overview",
+                        "date": "2015",
+                    },
+                },
+                {
+                    "key": "ATTACH1",
+                    "data": {
+                        "itemType": "attachment",
+                        "title": "Mantle hydration PDF",
+                        "date": "2015",
+                    },
+                },
+            ],
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "search",
+            "run",
+            "mantle hydration",
+            "--search-mode",
+            "keyword",
+            "--no-attachments",
+            "--limit",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["query"]["include_attachments"] is False
+    hit_types = [hit["item"]["item_type"] for hit in payload["hits"]]
+    assert "attachment" not in hit_types
+    assert "journalArticle" in hit_types
+
+
+@respx.mock
+def test_search_run_attachments_flag_keeps_attachment_hits() -> None:
+    respx.get("http://remote.test/users/0/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "ARTICLE1",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Mantle hydration overview",
+                        "date": "2015",
+                    },
+                },
+                {
+                    "key": "ATTACH1",
+                    "data": {
+                        "itemType": "attachment",
+                        "title": "Mantle hydration PDF",
+                        "date": "2015",
+                    },
+                },
+            ],
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "search",
+            "run",
+            "mantle hydration",
+            "--search-mode",
+            "keyword",
+            "--attachments",
+            "--limit",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["query"]["include_attachments"] is True
+    hit_types = [hit["item"]["item_type"] for hit in payload["hits"]]
+    assert "attachment" in hit_types
+
+
+@respx.mock
 def test_search_run_debug_emits_debug_payload() -> None:
     respx.get("http://remote.test/users/0/items").mock(
         return_value=Response(

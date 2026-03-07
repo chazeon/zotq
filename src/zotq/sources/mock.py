@@ -234,6 +234,8 @@ class MockSourceAdapter:
 
         if query.item_type and query.item_type != item.item_type:
             return False
+        if not query.include_attachments and not query.item_type and (item.item_type or "").lower() == "attachment":
+            return False
 
         if query.tags:
             item_tags = {t.lower() for t in item.tags}

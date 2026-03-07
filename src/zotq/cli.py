@@ -73,6 +73,7 @@ def _build_search_debug_payload(result: SearchResult, query: QuerySpec) -> dict[
             "lexical_k": query.lexical_k,
             "vector_k": query.vector_k,
             "alpha": query.alpha,
+            "include_attachments": query.include_attachments,
         },
         "hits": hits_payload,
     }
@@ -220,6 +221,13 @@ def search_group() -> None:
 @click.option("tags", "--tag", type=str, multiple=True)
 @click.option("collection", "--collection", type=str, default=None)
 @click.option("item_type", "--item-type", type=str, default=None)
+@click.option(
+    "include_attachments",
+    "--attachments/--no-attachments",
+    default=True,
+    show_default=True,
+    help="Include attachment items in search results.",
+)
 @click.option("year_from", "--year-from", type=int, default=None)
 @click.option("year_to", "--year-to", type=int, default=None)
 @click.option("alpha", "--alpha", type=float, default=None)
@@ -247,6 +255,7 @@ def search_run(
     tags: tuple[str, ...],
     collection: str | None,
     item_type: str | None,
+    include_attachments: bool,
     year_from: int | None,
     year_to: int | None,
     alpha: float | None,
@@ -281,6 +290,7 @@ def search_run(
         tags=list(tags),
         collection=collection,
         item_type=item_type,
+        include_attachments=include_attachments,
         alpha=alpha if alpha is not None else defaults.alpha,
         lexical_k=lexical_k if lexical_k is not None else defaults.lexical_k,
         vector_k=vector_k if vector_k is not None else defaults.vector_k,

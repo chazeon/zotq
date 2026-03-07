@@ -65,6 +65,24 @@ def test_keyword_attachment_penalty_is_disabled_with_item_type_filter(tmp_path: 
         index.close()
 
 
+def test_keyword_no_attachments_excludes_attachment_hits(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        text = "mantle hydration"
+        article = Item(key="ARTICLE", item_type="journalArticle", title=text)
+        attachment = Item(key="ATTACH", item_type="attachment", title=text)
+        _upsert(index, article, text)
+        _upsert(index, attachment, text)
+
+        hits = index.search_keyword(
+            QuerySpec(text=text, search_mode=SearchMode.KEYWORD, include_attachments=False, limit=5),
+        )
+
+        assert [hit.item.key for hit in hits] == ["ARTICLE"]
+    finally:
+        index.close()
+
+
 def test_keyword_scores_are_non_negative_and_descending(tmp_path: Path) -> None:
     index = LexicalIndex(tmp_path / "lexical.sqlite3")
     try:

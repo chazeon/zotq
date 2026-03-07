@@ -238,6 +238,7 @@ class QuerySpec(BaseModel):
     tags: list[str] = Field(default_factory=list)
     collection: str | None = None
     item_type: str | None = None
+    include_attachments: bool = True
     alpha: float | None = Field(default=None, ge=0.0, le=1.0)
     lexical_k: int | None = Field(default=None, ge=1)
     vector_k: int | None = Field(default=None, ge=1)

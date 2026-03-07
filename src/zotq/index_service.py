@@ -507,6 +507,8 @@ class MockIndexService:
             return False
         if query.item_type and query.item_type != item.item_type:
             return False
+        if not query.include_attachments and not query.item_type and cls._is_attachment(item):
+            return False
         if query.tags:
             item_tags = {tag.lower() for tag in item.tags}
             if not all(tag.lower() in item_tags for tag in query.tags):
