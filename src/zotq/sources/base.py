@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from ..models import BackendCapabilities, Collection, Item, QuerySpec, SearchHit, Tag
 
@@ -64,4 +64,12 @@ class SourceAdapter(Protocol):
         ...
 
     def list_tags(self) -> list[Tag]:
+        ...
+
+
+@runtime_checkable
+class WatermarkSourceAdapter(Protocol):
+    """Optional paging extension for source-side checkpoint fidelity."""
+
+    def list_items_watermark(self, *, limit: int = 100, watermark: str | None = None) -> tuple[list[Item], str | None]:
         ...

@@ -388,14 +388,18 @@ class MockIndexService:
         scope: str,
         full: bool,
         expected_total: int | None,
-        next_offset: int,
+        paging_mode: str = "offset",
+        next_offset: int | None = None,
+        next_cursor: str | None = None,
         collected_keys: list[str],
     ) -> None:
         self._checkpoints.write_collect(
             scope=scope,
             full=full,
             expected_total=expected_total,
+            paging_mode=paging_mode,
             next_offset=next_offset,
+            next_cursor=next_cursor,
             collected_keys=collected_keys,
         )
 

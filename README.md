@@ -173,7 +173,8 @@ Use `--no-progress` to disable it.
 `index sync --profiles-only` is an explicit migration/remediation pass that fetches and reprocesses only items whose stored lexical/vector profile versions mismatch current config targets.
 It cannot be combined with `--full`.
 Interrupted syncs now persist per-item ingest checkpoints and resume on the next run (including `--full`) without restarting from item zero.
-Source collection progress (`offset` + collected item keys) is also checkpointed, so retries can resume collection before ingest.
+Source collection progress is checkpointed with paging mode + token (`next_offset` for offset mode, `next_cursor` for watermark mode) plus collected item keys, so retries can resume collection before ingest.
+When an adapter exposes watermark/cursor paging, `zotq` uses that checkpoint path automatically.
 `index sync --full` clears and rebuilds lexical/vector indexes from scratch.
 `index enrich` updates metadata in place without rebuilding vectors.
 - `--field citation-key` (default): BBT RPC/BibTeX fallback enrichment.

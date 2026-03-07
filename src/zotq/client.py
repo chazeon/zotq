@@ -11,7 +11,7 @@ from .factory import build_index_service, build_source_adapter
 from .index_service import MockIndexService
 from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchBackend, SearchHit, SearchMode, SearchResult, Tag
 from .query_engine import QueryEngine
-from .sources import SourceAdapter
+from .sources import SourceAdapter, WatermarkSourceAdapter
 
 ProgressCallback = Callable[[str, int, int | None], None]
 
@@ -569,6 +569,10 @@ class ZotQueryClient:
         collected_keys: list[str] = []
         expected_total = self._source.count_items()
         offset = 0
+        cursor: str | None = None
+        list_items_watermark = self._source.list_items_watermark if isinstance(self._source, WatermarkSourceAdapter) else None
+        paging_mode = "watermark" if callable(list_items_watermark) else "offset"
+        seen_cursors: set[str] = set()
 
         get_collect = getattr(self._index, "get_collect_checkpoint", None)
         write_collect = getattr(self._index, "write_collect_checkpoint", None)
@@ -579,8 +583,14 @@ class ZotQueryClient:
             if isinstance(state, dict):
                 scope = str(state.get("scope") or "").strip().lower()
                 resume_full = bool(state.get("full", False))
-                if scope == checkpoint_scope and resume_full == full:
-                    offset = max(0, self._as_int(state.get("next_offset"), default=0))
+                state_mode = str(state.get("paging_mode") or "offset").strip().lower()
+                if scope == checkpoint_scope and resume_full == full and state_mode == paging_mode:
+                    if paging_mode == "watermark":
+                        raw_cursor = state.get("next_cursor")
+                        cursor_value = str(raw_cursor).strip() if raw_cursor is not None else ""
+                        cursor = cursor_value or None
+                    else:
+                        offset = max(0, self._as_int(state.get("next_offset"), default=0))
                     expected_raw = state.get("expected_total")
                     if expected_raw is not None:
                         expected_total = max(0, self._as_int(expected_raw, default=0))
@@ -602,7 +612,15 @@ class ZotQueryClient:
                     clear_collect()
 
         while True:
-            page = self._source.list_items(limit=page_size, offset=offset)
+            if paging_mode == "watermark":
+                raw_page, raw_next_cursor = list_items_watermark(limit=page_size, watermark=cursor)
+                page = raw_page if isinstance(raw_page, list) else []
+                next_cursor_raw = str(raw_next_cursor).strip() if raw_next_cursor is not None else ""
+                next_cursor = next_cursor_raw or None
+            else:
+                page = self._source.list_items(limit=page_size, offset=offset)
+                next_cursor = None
+
             if not page:
                 break
             for item in page:
@@ -612,19 +630,33 @@ class ZotQueryClient:
                 seen_keys.add(key)
                 collected_keys.append(key)
                 items.append(item)
-            offset += len(page)
+            next_offset = offset + len(page) if paging_mode == "offset" else None
             if callable(write_collect):
                 write_collect(
                     scope=checkpoint_scope,
                     full=full,
                     expected_total=expected_total,
-                    next_offset=offset,
+                    paging_mode=paging_mode,
+                    next_offset=next_offset,
+                    next_cursor=next_cursor if paging_mode == "watermark" else None,
                     collected_keys=collected_keys,
                 )
             if progress is not None:
                 progress("collect", len(items), expected_total)
-            if len(page) < page_size:
-                break
+            if paging_mode == "watermark":
+                if next_cursor is None:
+                    break
+                if next_cursor == cursor:
+                    break
+                if next_cursor in seen_cursors:
+                    break
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+            else:
+                if next_offset is not None:
+                    offset = next_offset
+                if len(page) < page_size:
+                    break
         return items
 
     def _collect_profile_mismatch_items(self, *, progress: ProgressCallback | None = None) -> list[Item]:

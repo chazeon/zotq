@@ -130,7 +130,8 @@ Click CLI
     - vector hash for semantic embedding refresh.
     - lexical/vector profile versions can force targeted reprocessing when mappings/chunk policy changes.
   - `index sync --profiles-only` reprocesses only items with lexical/vector profile-version mismatches.
-  - Source collection checkpoints (`scope`, `full`, `next_offset`, `collected_keys`) enable resume before ingest.
+  - Source collection checkpoints (`scope`, `full`, `paging_mode`, paging token, `collected_keys`) enable resume before ingest.
+  - Offset paging remains the baseline; adapters can opt into watermark/cursor checkpoint paging (`next_cursor`) for higher-fidelity resume.
   - Per-item ingest checkpoints (`mode`, `done`, `total`, `remaining_keys`) enable interruption-safe resume on next `index sync`.
   - `index sync --full` and `index rebuild` force full reprocessing.
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
@@ -151,6 +152,7 @@ Click CLI
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
+  - Optional watermark/cursor collect checkpoint flow (`paging_mode=watermark`) for adapters that provide paging tokens.
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
@@ -666,8 +668,8 @@ src/zotq/
    - Reporting for version mismatch counts is now available via `index inspect`.
    - Explicit migration workflow is available via `index sync --profiles-only`.
 3. Improve source checkpointing fidelity:
-   - Add source watermark/checkpoint support beyond offset paging where adapters can provide it.
-   - Ensure restart logic handles source-order drift safely.
+   - Source watermark/checkpoint support is now available where adapters provide paging tokens.
+   - Restart logic now tolerates source-order drift via collected-key dedupe + resume checkpoints.
 4. Post-v1 feature roadmap:
    - Introduce low-risk mutation commands (`collection add-item/remove-item`, `tag add/remove`) with `--dry-run`/`--yes`.
    - Keep MCP integration as separate phase after CLI contracts stabilize.

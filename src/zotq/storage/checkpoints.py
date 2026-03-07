@@ -81,17 +81,23 @@ class CheckpointStore:
         scope: str,
         full: bool,
         expected_total: int | None,
-        next_offset: int,
+        paging_mode: str = "offset",
+        next_offset: int | None = None,
+        next_cursor: str | None = None,
         collected_keys: list[str],
     ) -> None:
         payload = self.read()
         collect_payload: dict[str, object] = {
             "scope": scope,
             "full": bool(full),
-            "next_offset": max(0, int(next_offset)),
+            "paging_mode": paging_mode,
             "collected_keys": [str(key) for key in collected_keys if key],
             "updated_at": datetime.now().astimezone().isoformat(),
         }
+        if next_offset is not None:
+            collect_payload["next_offset"] = max(0, int(next_offset))
+        if next_cursor is not None and next_cursor.strip():
+            collect_payload["next_cursor"] = next_cursor.strip()
         if expected_total is not None:
             collect_payload["expected_total"] = max(0, int(expected_total))
         payload["collect"] = collect_payload

@@ -179,6 +179,78 @@ def test_index_sync_collect_resumes_after_collection_interruption() -> None:
     assert "collect" not in payload
 
 
+def test_index_sync_collect_resumes_from_watermark_checkpoint_after_interruption() -> None:
+    class _WatermarkCollectSource(MockSourceAdapter):
+        def __init__(self) -> None:
+            super().__init__(semantic_enabled=True)
+            self._items = [Item(key=f"K{i:03d}", item_type="journalArticle", title=f"Title {i}") for i in range(6)]
+            self.watermark_calls: list[str | None] = []
+            self._failed_once = False
+
+        def list_items(self, *, limit: int = 100, offset: int = 0) -> list[Item]:
+            raise AssertionError("Offset paging should not run when watermark paging is available.")
+
+        def list_items_watermark(self, *, limit: int = 100, watermark: str | None = None) -> tuple[list[Item], str | None]:
+            self.watermark_calls.append(watermark)
+            start = int(watermark) if watermark is not None else 0
+            if not self._failed_once and start >= 2:
+                self._failed_once = True
+                raise RuntimeError("watermark interrupted")
+
+            # Simulate source-order drift after resume by overlapping one previously seen row.
+            if start >= 2:
+                start -= 1
+            page = list(self._items[start : start + 2])
+            next_value = start + len(page)
+            next_cursor = str(next_value) if next_value < len(self._items) else None
+            return page, next_cursor
+
+        def count_items(self) -> int | None:
+            return len(self._items)
+
+        def get_item(self, key: str) -> Item | None:
+            for item in self._items:
+                if item.key == key:
+                    return item
+            return None
+
+    config = AppConfig()
+    profile = config.profiles["default"]
+    profile.index.index_dir = tempfile.mkdtemp(prefix="zotq-test-watermark-resume-index-")
+    source = _WatermarkCollectSource()
+    index = MockIndexService(profile.index)
+    client = ZotQueryClient(
+        config=config,
+        profile_name="default",
+        source_adapter=source,
+        index_service=index,
+    )
+
+    with pytest.raises(RuntimeError, match="watermark interrupted"):
+        client.index_sync(full=False)
+
+    checkpoint = index._checkpoints.read()  # type: ignore[attr-defined]
+    collect = checkpoint.get("collect")
+    assert isinstance(collect, dict)
+    assert collect.get("paging_mode") == "watermark"
+    assert collect.get("next_cursor") == "2"
+
+    first_run_calls = list(source.watermark_calls)
+    assert first_run_calls == [None, "2"]
+
+    status = client.index_sync(full=False)
+    assert status.ready is True
+    assert status.document_count == len(source._items)
+
+    second_run_calls = source.watermark_calls[len(first_run_calls) :]
+    assert second_run_calls
+    assert second_run_calls[0] == "2"
+    assert None not in second_run_calls
+
+    payload = index._checkpoints.read()  # type: ignore[attr-defined]
+    assert "collect" not in payload
+
+
 def test_index_sync_profiles_only_reindexes_profile_mismatches_without_paging_source() -> None:
     class _CountingSource(MockSourceAdapter):
         def __init__(self) -> None:
