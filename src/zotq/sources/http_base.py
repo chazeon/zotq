@@ -126,6 +126,15 @@ class HttpZoteroSourceAdapter(SourceAdapter):
             return None
         return parse_item(response.json())
 
+    def get_items(self, keys: list[str]) -> list[Item]:
+        clean_keys = [key.strip() for key in keys if key and key.strip()]
+        if not clean_keys:
+            return []
+        response = self._get("items", params={"itemKey": ",".join(clean_keys)})
+        rows = parse_items(response.json() if response is not None else [])
+        by_key = {item.key: item for item in rows if item.key}
+        return [by_key[key] for key in clean_keys if key in by_key]
+
     def get_item_bibtex(self, key: str) -> str | None:
         response = self._get(f"items/{key}", params={"format": "bibtex"}, allow_not_found=True)
         if response is None:

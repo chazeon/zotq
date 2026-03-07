@@ -9,7 +9,24 @@ import re
 
 from .factory import build_index_service, build_source_adapter
 from .index_service import MockIndexService
-from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchBackend, SearchHit, SearchMode, SearchResult, Tag
+from .models import (
+    AppConfig,
+    BackendCapabilities,
+    Collection,
+    Item,
+    ItemCiteKeyMultiKeyResponse,
+    ItemCiteKeyPerKeyResult,
+    ItemGetMultiKeyResponse,
+    ItemGetPerKeyResult,
+    MultiKeyResultStatus,
+    MultiKeyTransportTelemetry,
+    QuerySpec,
+    SearchBackend,
+    SearchHit,
+    SearchMode,
+    SearchResult,
+    Tag,
+)
 from .query_engine import QueryEngine
 from .sources import SourceAdapter, WatermarkSourceAdapter
 
@@ -172,6 +189,45 @@ class ZotQueryClient:
 
     def get_item(self, key: str) -> Item | None:
         return self._source.get_item(key)
+
+    @staticmethod
+    def _clean_item_keys(keys: list[str]) -> list[str]:
+        return [key.strip() for key in keys if key and key.strip()]
+
+    def _get_items_batch_first(self, keys: list[str]) -> tuple[dict[str, Item], MultiKeyTransportTelemetry]:
+        clean_keys = self._clean_item_keys(keys)
+        telemetry = MultiKeyTransportTelemetry(batch_used=False, fallback_loop=False)
+        if not clean_keys:
+            return {}, telemetry
+
+        by_key: dict[str, Item] = {}
+        batch_get = getattr(self._source, "get_items", None)
+        if callable(batch_get):
+            telemetry.batch_used = True
+            for item in batch_get(clean_keys) or []:
+                item_key = (item.key or "").strip()
+                if item_key and item_key not in by_key:
+                    by_key[item_key] = item
+        else:
+            telemetry.fallback_loop = True
+            for key in clean_keys:
+                item = self._source.get_item(key)
+                if item is not None:
+                    by_key[key] = item
+
+        return by_key, telemetry
+
+    def get_items_multi(self, keys: list[str]) -> ItemGetMultiKeyResponse:
+        clean_keys = self._clean_item_keys(keys)
+        by_key, telemetry = self._get_items_batch_first(clean_keys)
+        rows: list[ItemGetPerKeyResult] = []
+        for key in clean_keys:
+            item = by_key.get(key)
+            if item is None:
+                rows.append(ItemGetPerKeyResult(key=key, found=False, status=MultiKeyResultStatus.NOT_FOUND))
+                continue
+            rows.append(ItemGetPerKeyResult(key=key, found=True, status=MultiKeyResultStatus.OK, item=item))
+        return ItemGetMultiKeyResponse(transport=telemetry, results=rows)
 
     @staticmethod
     def _citation_key_from_extra(extra: str | None) -> str | None:
@@ -367,17 +423,12 @@ class ZotQueryClient:
     def index_enrich_citation_keys(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
         return self._enrich_field_citation_key(progress=progress)
 
-    def get_item_citation_key(self, key: str, *, prefer: str = "auto") -> dict[str, str | bool | None]:
-        prefer_mode = prefer.strip().lower()
-        item = self.get_item(key)
-        if item is None:
-            return {"found": False, "item_key": key, "citation_key": None, "source": None, "prefer": prefer_mode}
-
-        candidates: list[tuple[str, str | None]] = [
-            ("item.citation_key", item.citation_key),
-            ("item.extra", self._citation_key_from_extra(item.extra)),
-            ("rpc", self._source.get_item_citation_key_rpc(key)),
-            ("bibtex", self._citation_key_from_bibtex(self._source.get_item_bibtex(key))),
+    def _resolve_citation_key_for_item(self, *, item_key: str, item: Item, prefer_mode: str) -> tuple[str | None, str | None]:
+        candidates: list[tuple[str, Callable[[], str | None]]] = [
+            ("item.citation_key", lambda: item.citation_key),
+            ("item.extra", lambda: self._citation_key_from_extra(item.extra)),
+            ("rpc", lambda: self._source.get_item_citation_key_rpc(item_key)),
+            ("bibtex", lambda: self._citation_key_from_bibtex(self._source.get_item_bibtex(item_key))),
         ]
 
         if prefer_mode == "auto":
@@ -391,20 +442,63 @@ class ZotQueryClient:
             }
             selected = prefer_map.get(prefer_mode)
             if selected is None:
-                raise ValueError(f"Unsupported citation key preference: {prefer}")
+                raise ValueError(f"Unsupported citation key preference: {prefer_mode}")
             ordered = [entry for entry in candidates if entry[0] == selected]
 
-        for source, value in ordered:
+        for source, resolver in ordered:
+            value = resolver()
             if value and value.strip():
-                return {
-                    "found": True,
-                    "item_key": key,
-                    "citation_key": value.strip(),
-                    "source": source,
-                    "prefer": prefer_mode,
-                }
+                return value.strip(), source
+        return None, None
 
+    def get_item_citation_key(self, key: str, *, prefer: str = "auto") -> dict[str, str | bool | None]:
+        prefer_mode = prefer.strip().lower()
+        item = self.get_item(key)
+        if item is None:
+            return {"found": False, "item_key": key, "citation_key": None, "source": None, "prefer": prefer_mode}
+
+        citation_key, source = self._resolve_citation_key_for_item(item_key=key, item=item, prefer_mode=prefer_mode)
+        if citation_key:
+            return {
+                "found": True,
+                "item_key": key,
+                "citation_key": citation_key,
+                "source": source,
+                "prefer": prefer_mode,
+            }
         return {"found": True, "item_key": key, "citation_key": None, "source": None, "prefer": prefer_mode}
+
+    def get_items_citation_keys_multi(self, keys: list[str], *, prefer: str = "auto") -> ItemCiteKeyMultiKeyResponse:
+        prefer_mode = prefer.strip().lower()
+        item_payload = self.get_items_multi(keys)
+        rows: list[ItemCiteKeyPerKeyResult] = []
+        for row in item_payload.results:
+            if not row.found or row.item is None:
+                rows.append(
+                    ItemCiteKeyPerKeyResult(
+                        key=row.key,
+                        found=False,
+                        status=MultiKeyResultStatus.NOT_FOUND,
+                        prefer=prefer_mode,
+                    )
+                )
+                continue
+            citation_key, source = self._resolve_citation_key_for_item(
+                item_key=row.key,
+                item=row.item,
+                prefer_mode=prefer_mode,
+            )
+            rows.append(
+                ItemCiteKeyPerKeyResult(
+                    key=row.key,
+                    found=True,
+                    status=MultiKeyResultStatus.OK,
+                    citation_key=citation_key,
+                    source=source,
+                    prefer=prefer_mode,
+                )
+            )
+        return ItemCiteKeyMultiKeyResponse(transport=item_payload.transport, results=rows)
 
     def get_item_bibliography(
         self,

@@ -8,7 +8,8 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S1` (`done`) Dependency bootstrap (`sqlite-vec` + BibTeX parser) and smoke coverage.
 - [x] `S2` (`done`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
 - [x] `S3` (`done`) Execute P0 benchmark harness (`T0.3`) with tests first.
-- [ ] `S4` (`in_progress`) Start P1 retrieval overhead work (`T1.1`/`T1.2`/`T1.3`).
+- [x] `S4` (`done`) Execute P1 retrieval overhead work (`T1.1`/`T1.2`/`T1.3`) with test coverage.
+- [ ] `S5` (`in_progress`) Start parser-backed BibTeX path (`T2.2`/`T2.3`).
 
 ## P0 Contracts and Benchmarks
 
@@ -26,15 +27,15 @@ Status values: `todo`, `in_progress`, `done`.
 
 ## P1 Retrieval Overhead First
 
-- [ ] `T1.1` (`todo`) Implement `item get --key` multi-key CLI form.
+- [x] `T1.1` (`done`) Implement `item get --key` multi-key CLI form.
   - Files: `src/zotq/cli.py`, `src/zotq/contracts.py`.
   - Tests: `tests/test_cli_commands.py`, `tests/test_cli_contract_model.py`.
 
-- [ ] `T1.2` (`todo`) Implement `item citekey --key` multi-key CLI form.
+- [x] `T1.2` (`done`) Implement `item citekey --key` multi-key CLI form.
   - Files: `src/zotq/cli.py`, `src/zotq/contracts.py`, `src/zotq/client.py`.
   - Tests: `tests/test_cli_commands.py`, `tests/test_item_multi_key.py`.
 
-- [ ] `T1.3` (`todo`) Batch-first transport for multi-key item reads with fallback telemetry.
+- [x] `T1.3` (`done`) Batch-first transport for multi-key item reads with fallback telemetry.
   - Files: `src/zotq/client.py`, `src/zotq/sources/base.py`, `src/zotq/sources/http_base.py`.
   - Tests: `tests/test_item_multi_key.py`, `tests/test_bibliography_batching.py`.
 

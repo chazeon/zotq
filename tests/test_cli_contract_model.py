@@ -62,6 +62,11 @@ def test_multi_key_output_contracts_are_explicit() -> None:
     assert get_spec.partial_failures_are_per_key is True
     assert citekey_spec.partial_failures_are_per_key is True
 
+    item_get_cmd = next(spec for spec in contract.commands if spec.name == "item get")
+    item_citekey_cmd = next(spec for spec in contract.commands if spec.name == "item citekey")
+    assert "--key" in item_get_cmd.usage
+    assert "--key" in item_citekey_cmd.usage
+
 
 def test_multi_key_response_models_capture_partial_failures() -> None:
     get_payload = ItemGetMultiKeyResponse(

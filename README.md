@@ -273,6 +273,19 @@ Better BibTeX RPC requires the Better BibTeX plugin in Zotero and uses:
 - `POST http://127.0.0.1:23119/better-bibtex/json-rpc`
 - method: `item.citationkey`
 
+Multi-key item reads (repeat `--key`):
+
+```bash
+uv run zotq --mode local-api --output json item get --key XVMVWQZX --key MI26RYRR
+uv run zotq --mode local-api --output json item citekey --key XVMVWQZX --key MI26RYRR --prefer auto
+uv run zotq --mode local-api --output jsonl item get --key XVMVWQZX --key MISSING
+```
+
+For multi-key commands:
+- `--output json` returns an envelope with `command`, `transport`, and ordered `results`.
+- `transport.batch_used`/`transport.fallback_loop` report batch vs single-call retrieval path.
+- `--output jsonl` emits one per-key result object per line.
+
 Bibliography output:
 
 ```bash

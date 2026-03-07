@@ -332,32 +332,71 @@ def item_group() -> None:
 
 
 @item_group.command("get")
-@click.argument("key", required=True)
+@click.argument("key", required=False)
+@click.option("keys", "--key", type=str, multiple=True, help="Repeatable item key for batched reads.")
 @click.option("style", "--style", type=str, default=None, help="Citation style for bibliography output.")
 @click.option("locale", "--locale", type=str, default=None, help="Locale for bibliography output.")
 @click.option("linkwrap", "--linkwrap/--no-linkwrap", default=None, help="Wrap bibliography entries with links.")
 @pass_runtime
-def item_get(runtime: RuntimeContext, key: str, style: str | None, locale: str | None, linkwrap: bool | None) -> None:
+def item_get(
+    runtime: RuntimeContext,
+    key: str | None,
+    keys: tuple[str, ...],
+    style: str | None,
+    locale: str | None,
+    linkwrap: bool | None,
+) -> None:
+    requested_keys: list[str] = []
+    if key and key.strip():
+        requested_keys.append(key.strip())
+    requested_keys.extend(value.strip() for value in keys if value and value.strip())
+    if not requested_keys:
+        raise click.ClickException("Pass KEY or at least one --key value.")
+
+    is_multi = len(requested_keys) > 1 or len(keys) > 0
+
     try:
         if runtime.output == OutputFormat.BIB:
-            bibliography_payload = runtime.client.get_item_bibliography(key, style=style, locale=locale, linkwrap=linkwrap)
-            click.echo(render_payload(bibliography_payload, runtime.output))
+            if not is_multi:
+                bibliography_payload = runtime.client.get_item_bibliography(
+                    requested_keys[0],
+                    style=style,
+                    locale=locale,
+                    linkwrap=linkwrap,
+                )
+                click.echo(render_payload(bibliography_payload, runtime.output))
+                return
+            entries = runtime.client.get_items_bibliography(requested_keys, style=style, locale=locale, linkwrap=linkwrap)
+            click.echo(render_payload(entries, runtime.output))
             return
         if runtime.output == OutputFormat.BIBTEX:
             if style or locale or linkwrap is not None:
                 raise click.ClickException("--style/--locale/--linkwrap are only supported with --output bib.")
-            bibtex = runtime.client.get_item_bibtex(key)
-            click.echo(render_payload(bibtex or "", runtime.output))
+            if not is_multi:
+                bibtex = runtime.client.get_item_bibtex(requested_keys[0])
+                click.echo(render_payload(bibtex or "", runtime.output))
+                return
+            entries = runtime.client.get_items_bibtex(requested_keys)
+            click.echo(render_payload(entries, runtime.output))
             return
-        item = runtime.client.get_item(key)
+        if not is_multi:
+            item = runtime.client.get_item(requested_keys[0])
+            payload = {"found": item is not None, "item": item.model_dump(mode="json") if item else None}
+            click.echo(render_payload(payload, runtime.output))
+            return
+        payload = runtime.client.get_items_multi(requested_keys)
     except (BackendConnectionError, IndexNotReadyError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"found": item is not None, "item": item.model_dump(mode="json") if item else None}
-    click.echo(render_payload(payload, runtime.output))
+
+    if runtime.output == OutputFormat.JSON:
+        click.echo(render_payload(payload.model_dump(mode="json"), runtime.output))
+        return
+    click.echo(render_payload([entry.model_dump(mode="json") for entry in payload.results], runtime.output))
 
 
 @item_group.command("citekey")
-@click.argument("key", required=True)
+@click.argument("key", required=False)
+@click.option("keys", "--key", type=str, multiple=True, help="Repeatable item key for batched reads.")
 @click.option(
     "prefer",
     "--prefer",
@@ -367,14 +406,30 @@ def item_get(runtime: RuntimeContext, key: str, style: str | None, locale: str |
     help="Citation key source preference.",
 )
 @pass_runtime
-def item_citekey(runtime: RuntimeContext, key: str, prefer: str) -> None:
+def item_citekey(runtime: RuntimeContext, key: str | None, keys: tuple[str, ...], prefer: str) -> None:
+    requested_keys: list[str] = []
+    if key and key.strip():
+        requested_keys.append(key.strip())
+    requested_keys.extend(value.strip() for value in keys if value and value.strip())
+    if not requested_keys:
+        raise click.ClickException("Pass KEY or at least one --key value.")
+
+    is_multi = len(requested_keys) > 1 or len(keys) > 0
+
     try:
-        payload = runtime.client.get_item_citation_key(key, prefer=prefer.lower())
+        if not is_multi:
+            payload = runtime.client.get_item_citation_key(requested_keys[0], prefer=prefer.lower())
+            click.echo(render_payload(payload, runtime.output))
+            return
+        payload = runtime.client.get_items_citation_keys_multi(requested_keys, prefer=prefer.lower())
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     except (BackendConnectionError, IndexNotReadyError) as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(render_payload(payload, runtime.output))
+    if runtime.output == OutputFormat.JSON:
+        click.echo(render_payload(payload.model_dump(mode="json"), runtime.output))
+        return
+    click.echo(render_payload([entry.model_dump(mode="json") for entry in payload.results], runtime.output))
 
 
 @main.group("collection")

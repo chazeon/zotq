@@ -99,6 +99,14 @@ class MockSourceAdapter:
                 return item
         return None
 
+    def get_items(self, keys: list[str]) -> list[Item]:
+        out: list[Item] = []
+        for key in keys:
+            item = self.get_item(key)
+            if item is not None:
+                out.append(item)
+        return out
+
     def get_item_bibtex(self, key: str) -> str | None:
         item = self.get_item(key)
         if item is None:

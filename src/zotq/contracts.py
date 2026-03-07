@@ -54,8 +54,18 @@ class PlannedOutputContract(BaseModel):
 V1_COMMANDS: list[CommandSpec] = [
     CommandSpec(resource="system", verb="health", usage="zotq system health", summary="Backend/source connectivity check"),
     CommandSpec(resource="search", verb="run", usage="zotq search run [QUERY] [options]", summary="Run keyword/fuzzy/semantic/hybrid search"),
-    CommandSpec(resource="item", verb="get", usage="zotq item get KEY", summary="Get one item by key"),
-    CommandSpec(resource="item", verb="citekey", usage="zotq item citekey KEY", summary="Resolve citation key for one item"),
+    CommandSpec(
+        resource="item",
+        verb="get",
+        usage="zotq item get KEY | zotq item get --key K1 --key K2 ...",
+        summary="Get one or more items by key",
+    ),
+    CommandSpec(
+        resource="item",
+        verb="citekey",
+        usage="zotq item citekey KEY | zotq item citekey --key K1 --key K2 ... [--prefer auto|json|extra|rpc|bibtex]",
+        summary="Resolve citation key for one or more items",
+    ),
     CommandSpec(resource="collection", verb="list", usage="zotq collection list", summary="List collections"),
     CommandSpec(resource="collection", verb="export", usage="zotq collection export KEY --format bibtex", summary="Export collection items as BibTeX"),
     CommandSpec(resource="tag", verb="list", usage="zotq tag list", summary="List tags"),

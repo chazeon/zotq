@@ -314,7 +314,9 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq system health`
 - `zotq search run [QUERY] [options]`
 - `zotq item get KEY`
+- `zotq item get --key K1 --key K2 ...`
 - `zotq item citekey KEY [--prefer auto|json|extra|rpc|bibtex]`
+- `zotq item citekey --key K1 --key K2 ... [--prefer auto|json|extra|rpc|bibtex]`
 - `zotq collection list`
 - `zotq collection export KEY --format bibtex [--include-children] [--batch-size N]`
 - `zotq tag list`
@@ -427,7 +429,7 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - Implementation status:
   - Implemented in current v1 surface and covered by tests/docs.
 
-### 6.10 Batched Multi-Key Requests (Planned)
+### 6.10 Batched Multi-Key Requests
 - Goal:
   - Reduce round trips and latency for repeated read operations while keeping command grammar stable.
   - Reduce network access-elevation churn in agentic workflows by avoiding chatty per-item call patterns.
@@ -440,7 +442,7 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - `zotq item get --key K1 --key K2 ...`
   - `zotq item citekey --key K1 --key K2 ... [--prefer ...]`
 - Output contract:
-  - `--output json`: list of per-key result objects in input order.
+  - `--output json`: envelope object (`ItemGetMultiKeyResponse` or `ItemCiteKeyMultiKeyResponse`) with `results` in input order.
   - `--output jsonl`: one per-key result object per line.
   - `--output table`: multi-row table with `key`, `found/status`, and core fields.
   - Partial failures must be explicit per key (do not fail whole response when only some keys fail).
@@ -453,6 +455,9 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - Prefer source batch endpoints (`itemKey=K1,K2,...`) where available.
   - Fallback to per-key adapter calls when batch endpoints are unavailable.
   - In agentic mode, expose whether a batched transport path was used.
+- Implementation status:
+  - Repeatable `--key` forms are implemented for `item get` and `item citekey`.
+  - Multi-key item reads are batch-first via source `itemKey=...` transport with explicit telemetry (`batch_used`, `fallback_loop`).
 - Testing requirements (test-first):
   - Backward compatibility for single-key forms.
   - Deterministic output order matching input key order.

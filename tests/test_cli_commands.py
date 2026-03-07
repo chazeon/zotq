@@ -390,6 +390,116 @@ def test_item_citekey_returns_citation_key() -> None:
 
 
 @respx.mock
+def test_item_citekey_supports_multi_key_option_json_output() -> None:
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,MISSING"}).mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "K1",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "First Item",
+                        "citationKey": "alpha2026",
+                    },
+                }
+            ],
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        ["--output", "json", "item", "citekey", "--key", "K1", "--key", "MISSING"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["command"] == "item citekey"
+    assert payload["results"][0]["key"] == "K1"
+    assert payload["results"][0]["found"] is True
+    assert payload["results"][0]["citation_key"] == "alpha2026"
+    assert payload["results"][0]["status"] == "ok"
+    assert payload["results"][1]["key"] == "MISSING"
+    assert payload["results"][1]["found"] is False
+    assert payload["results"][1]["status"] == "not_found"
+
+
+def test_item_citekey_requires_positional_or_repeatable_key() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "item", "citekey"])
+
+    assert result.exit_code != 0
+    assert "Pass KEY or at least one --key value" in result.output
+
+
+@respx.mock
+def test_item_get_supports_multi_key_option_json_output() -> None:
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,MISSING"}).mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "K1",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "First Item",
+                    },
+                }
+            ],
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        ["--output", "json", "item", "get", "--key", "K1", "--key", "MISSING"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["command"] == "item get"
+    assert payload["results"][0]["key"] == "K1"
+    assert payload["results"][0]["found"] is True
+    assert payload["results"][0]["status"] == "ok"
+    assert payload["results"][1]["key"] == "MISSING"
+    assert payload["results"][1]["found"] is False
+    assert payload["results"][1]["status"] == "not_found"
+
+
+@respx.mock
+def test_item_get_single_key_shape_is_unchanged() -> None:
+    respx.get("http://remote.test/users/0/items/K1").mock(
+        return_value=Response(
+            200,
+            json={
+                "key": "K1",
+                "data": {
+                    "itemType": "journalArticle",
+                    "title": "First Item",
+                },
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "item", "get", "K1"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["found"] is True
+    assert payload["item"]["key"] == "K1"
+
+
+def test_item_get_requires_positional_or_repeatable_key() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "item", "get"])
+
+    assert result.exit_code != 0
+    assert "Pass KEY or at least one --key value" in result.output
+
+
+@respx.mock
 def test_item_citekey_supports_prefer_bibtex() -> None:
     respx.get("http://remote.test/users/0/items/XVMVWQZX", params={"format": "bibtex"}).mock(
         return_value=Response(200, text="@article{staceyFromBibtex2019,}")
