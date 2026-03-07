@@ -2,6 +2,13 @@
 
 Status values: `todo`, `in_progress`, `done`.
 
+## Active Staged Plan
+
+- [x] `S0` (`done`) Baseline docs commit (`d88c964`) for DESIGN/TODO runbook.
+- [x] `S1` (`done`) Dependency bootstrap (`sqlite-vec` + BibTeX parser) and smoke coverage.
+- [ ] `S2` (`in_progress`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
+- [ ] `S3` (`todo`) Execute P0 benchmark harness (`T0.3`) with tests first.
+
 ## P0 Contracts and Benchmarks
 
 - [ ] `T0.1` (`todo`) Add multi-key output contract models and docs.
@@ -32,7 +39,7 @@ Status values: `todo`, `in_progress`, `done`.
 
 ## P2 Parser-backed BibTeX Path
 
-- [ ] `T2.1` (`todo`) Add BibTeX parser/serializer dependency.
+- [x] `T2.1` (`done`) Add BibTeX parser/serializer dependency.
   - Files: `pyproject.toml`, `README.md`.
   - Tests: dependency import smoke in `tests/`.
 
@@ -85,4 +92,3 @@ Status values: `todo`, `in_progress`, `done`.
 - [ ] `T5.3` (`todo`) Add extractor increments (text/html/pdf) with safe fallback.
   - Files: `src/zotq/pipeline/extractors.py`.
   - Tests: `tests/test_extractors.py`.
-

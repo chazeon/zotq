@@ -16,6 +16,10 @@ uv sync --group dev
 uv sync --extra dev
 ```
 
+Core runtime now includes:
+- `sqlite-vec` Python bindings (vector backend cutover path).
+- `bibtexparser` (parser-backed BibTeX parse/stringify path).
+
 ## Backends
 - `local-api`: talks to the Zotero Desktop local API.
 - `remote`: talks to a self-hosted or cloud API service.
