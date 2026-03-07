@@ -14,6 +14,13 @@ def _upsert(index: LexicalIndex, item: Item, text: str) -> None:
     index.upsert_item(item=item, chunks=_chunks(item.key, text), full_text=text)
 
 
+def _documents_table_exists(index: LexicalIndex) -> bool:
+    row = index._conn.execute(  # type: ignore[attr-defined]
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'documents'"
+    ).fetchone()
+    return row is not None
+
+
 def test_keyword_downranks_attachments_by_default(tmp_path: Path) -> None:
     index = LexicalIndex(tmp_path / "lexical.sqlite3")
     try:
@@ -213,6 +220,7 @@ def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Pat
 
     index = LexicalIndex(db_path)
     try:
+        assert _documents_table_exists(index) is False
         rows = index._conn.execute(  # type: ignore[attr-defined]
             """
             SELECT field_name, value_norm
@@ -297,12 +305,12 @@ def test_upsert_does_not_dual_write_documents_row(tmp_path: Path) -> None:
     try:
         item = Item(key="NO-DOC-DUAL", item_type="journalArticle", title="Canonical only")
         _upsert(index, item, "canonical only body")
-
-        row = index._conn.execute(  # type: ignore[attr-defined]
-            "SELECT COUNT(*) AS c FROM documents WHERE item_key = 'NO-DOC-DUAL'"
-        ).fetchone()
-        assert row is not None
-        assert int(row["c"]) == 0
+        if _documents_table_exists(index):
+            row = index._conn.execute(  # type: ignore[attr-defined]
+                "SELECT COUNT(*) AS c FROM documents WHERE item_key = 'NO-DOC-DUAL'"
+            ).fetchone()
+            assert row is not None
+            assert int(row["c"]) == 0
     finally:
         index.close()
 
@@ -357,6 +365,7 @@ def test_legacy_schema_migration_backfills_items_table(tmp_path: Path) -> None:
 
     index = LexicalIndex(db_path)
     try:
+        assert _documents_table_exists(index) is False
         row = index._conn.execute(  # type: ignore[attr-defined]
             """
             SELECT item_key, title, item_type, date
@@ -382,8 +391,9 @@ def test_get_item_reads_from_items_table_when_documents_row_missing(tmp_path: Pa
             doi="10.1000/read-items",
         )
         _upsert(index, item, "read body")
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key = 'ITEMS-READ'")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key = 'ITEMS-READ'")  # type: ignore[attr-defined]
 
         loaded = index.get_item("ITEMS-READ")
 
@@ -409,8 +419,9 @@ def test_sync_state_reads_from_items_when_documents_row_missing(tmp_path: Path) 
             lexical_profile_version=2,
             vector_profile_version=4,
         )
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key = 'SYNC-ITEMS'")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key = 'SYNC-ITEMS'")  # type: ignore[attr-defined]
 
         lexical_hash, vector_hash, content_hash, lexical_version, vector_version = index.get_item_sync_state("SYNC-ITEMS")
 
@@ -428,8 +439,9 @@ def test_keyword_search_reads_from_items_when_documents_rows_missing(tmp_path: P
     try:
         _upsert(index, Item(key="K-ITEMS-1", item_type="journalArticle", title="mantle hydration"), "mantle hydration")
         _upsert(index, Item(key="K-ITEMS-2", item_type="journalArticle", title="mantle hydration"), "mantle hydration")
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key IN ('K-ITEMS-1', 'K-ITEMS-2')")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key IN ('K-ITEMS-1', 'K-ITEMS-2')")  # type: ignore[attr-defined]
 
         hits = index.search_keyword(
             QuerySpec(text="mantle hydration", search_mode=SearchMode.KEYWORD, limit=5),
@@ -444,8 +456,9 @@ def test_fuzzy_search_reads_from_items_when_documents_row_missing(tmp_path: Path
     index = LexicalIndex(tmp_path / "lexical.sqlite3")
     try:
         _upsert(index, Item(key="F-ITEMS", item_type="journalArticle", title="tectonic inversion"), "tectonic inversion body")
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key = 'F-ITEMS'")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key = 'F-ITEMS'")  # type: ignore[attr-defined]
 
         hits = index.search_fuzzy(
             QuerySpec(text="tectonic inversion", search_mode=SearchMode.FUZZY, limit=5),
@@ -468,8 +481,9 @@ def test_filter_only_search_reads_from_items_when_documents_row_missing(tmp_path
             citation_key="staceyThermodynamicsGruneisenParameter2019",
         )
         _upsert(index, target, "thermodynamics gruneisen")
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key = 'FILTER-ITEMS'")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key = 'FILTER-ITEMS'")  # type: ignore[attr-defined]
 
         hits = index.search_keyword(
             QuerySpec(
@@ -491,8 +505,9 @@ def test_structured_filter_item_keys_read_from_items_when_documents_row_missing(
     try:
         target = Item(key="STRUCT-ITEMS", item_type="journalArticle", title="Hydration", doi="10.1000/struct")
         _upsert(index, target, "hydration body")
-        with index._conn:  # type: ignore[attr-defined]
-            index._conn.execute("DELETE FROM documents WHERE item_key = 'STRUCT-ITEMS'")  # type: ignore[attr-defined]
+        if _documents_table_exists(index):
+            with index._conn:  # type: ignore[attr-defined]
+                index._conn.execute("DELETE FROM documents WHERE item_key = 'STRUCT-ITEMS'")  # type: ignore[attr-defined]
 
         keys = index.item_keys_for_structured_filters(
             QuerySpec(search_mode=SearchMode.KEYWORD, doi="doi:10.1000/struct", limit=5),

@@ -153,14 +153,14 @@ Click CLI
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
   - Transitional `items` canonical table with backfill from `documents`; canonical ingest/read/hash/profile paths now use `items`.
   - Safe query-path cutover to `items` for index search/filter execution (`keyword`, `fuzzy`, filter-only, structured prefilter key lookup).
+  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are migrated and dropped on open when detected.
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
   - Optional watermark/cursor collect checkpoint flow (`paging_mode=watermark`) for adapters that provide paging tokens.
   - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - Explicit profile migration workflow via `index sync --profiles-only`.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
 - Still transitional:
-  - `documents`/legacy normalized columns remain only for migration/backfill compatibility and cleanup planning.
-  - Final cleanup/removal of legacy `documents` compatibility artifacts remains pending.
+  - Legacy document-schema migration importer remains for backward compatibility with old index files.
 
 ### 5.3 Layered Index Architecture (v2)
 Separate metadata, lexical, and vector concerns:
@@ -663,7 +663,7 @@ src/zotq/
 ## 17. Next Milestones (Unfinished)
 1. Complete v2 schema split:
    - Canonical metadata and safe query paths are now `items`-first.
-   - Remove remaining legacy `documents` compatibility artifacts after migration validation.
+   - Retire legacy document-schema importer after migration validation window.
 2. Add projection/version migration controls:
    - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
    - Reporting for version mismatch counts is now available via `index inspect`.

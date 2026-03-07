@@ -190,13 +190,13 @@ It also reports lexical/vector profile-version mismatch counts and sample mismat
   - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
   - Transitional canonical `items` table (backfilled from legacy `documents`) used for canonical ingest, item reads, and sync/profile hash state.
   - Safe query-path cutover to `items` for index search/filter execution (`keyword`, `fuzzy`, filter-only, structured prefilter lookup).
+  - Legacy `documents` runtime dual-write/fallback paths removed; legacy `documents` tables are migrated and dropped on open when present.
   - Split hash incremental sync and resume checkpoints.
   - `index inspect` profile-version mismatch reporting.
   - Explicit profile mismatch remediation via `index sync --profiles-only`.
   - `collection export` command surface and source-backed pagination/batching flow.
 - Still compatibility-backed:
-  - `documents`/legacy normalized columns remain only for migration/backfill compatibility.
-  - Final removal of legacy `documents` compatibility artifacts is not complete yet.
+  - Legacy document-schema migration importer remains for old index files.
 
 Run semantic search:
 
@@ -243,7 +243,7 @@ Notes:
 - If `--doi` or `--citation-key` is provided, `zotq` first runs an exact identifier lookup in `keyword` mode on the selected backend route (`auto|source|index`). If no exact hit is found, it falls back to the requested search mode.
 - DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
 - Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
-- Local index search now stores structured DOI/citation-key/journal metadata in normalized SQLite tables (`item_fields`, `identifiers`) with indexed lookups; legacy normalized columns in `documents` remain for compatibility during migration.
+- Local index search stores structured DOI/citation-key/journal metadata in normalized SQLite tables (`item_fields`, `identifiers`) with indexed lookups and `items`-first canonical metadata.
 - During `index sync`/`index rebuild`, missing citation keys are enriched (batch Better BibTeX RPC first, then batch BibTeX parse fallback when available).
 
 Resolve citation key:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import json
 import sqlite3
 from typing import ClassVar
 from difflib import SequenceMatcher
@@ -51,25 +50,6 @@ class LexicalIndex:
         self._conn.executescript(
             """
             PRAGMA journal_mode=WAL;
-
-            CREATE TABLE IF NOT EXISTS documents (
-                item_key TEXT PRIMARY KEY,
-                item_json TEXT NOT NULL,
-                title TEXT,
-                item_type TEXT,
-                date TEXT,
-                creators TEXT,
-                tags TEXT,
-                full_text TEXT,
-                content_hash TEXT,
-                lexical_hash TEXT,
-                vector_hash TEXT,
-                lexical_profile_version INTEGER,
-                vector_profile_version INTEGER,
-                doi_norm TEXT,
-                citation_key_norm TEXT,
-                journal_norm TEXT
-            );
 
             CREATE TABLE IF NOT EXISTS items (
                 item_key TEXT PRIMARY KEY,
@@ -150,43 +130,8 @@ class LexicalIndex:
             );
             """
         )
-        self._ensure_documents_columns()
         self._ensure_items_table()
         self._ensure_structured_tables()
-
-    def _ensure_documents_columns(self) -> None:
-        rows = self._conn.execute("PRAGMA table_info(documents)").fetchall()
-        columns = {str(row["name"]) for row in rows}
-        normalized_changed = False
-        with self._conn:
-            if "content_hash" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
-            if "lexical_hash" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN lexical_hash TEXT")
-            if "vector_hash" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN vector_hash TEXT")
-            if "lexical_profile_version" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN lexical_profile_version INTEGER")
-            if "vector_profile_version" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN vector_profile_version INTEGER")
-            if "doi_norm" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN doi_norm TEXT")
-                normalized_changed = True
-            if "citation_key_norm" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN citation_key_norm TEXT")
-                normalized_changed = True
-            if "journal_norm" not in columns:
-                self._conn.execute("ALTER TABLE documents ADD COLUMN journal_norm TEXT")
-                normalized_changed = True
-
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_doi_norm ON documents(doi_norm)")
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_documents_citation_key_norm ON documents(citation_key_norm)"
-            )
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_journal_norm ON documents(journal_norm)")
-
-        if normalized_changed:
-            self._backfill_normalized_columns()
 
     def _ensure_structured_tables(self) -> None:
         with self._conn:
@@ -208,7 +153,14 @@ class LexicalIndex:
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_doi_norm ON items(doi_norm)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_lexical_profile_version ON items(lexical_profile_version)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_items_vector_profile_version ON items(vector_profile_version)")
-        self._backfill_items_table()
+        self._migrate_legacy_documents_table()
+
+    def _table_exists(self, table_name: str) -> bool:
+        row = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
 
     @staticmethod
     def _field_value_hash(raw_value: str, normalized_value: str) -> str:
@@ -366,16 +318,16 @@ class LexicalIndex:
         params: tuple[object, ...] = tuple(field_names) + (len(field_names),)
         rows = self._conn.execute(
             f"""
-            SELECT d.item_key, d.item_json
-            FROM documents d
+            SELECT i.item_key, i.raw_json
+            FROM items i
             WHERE (
                 SELECT COUNT(*)
                 FROM item_fields f
-                WHERE f.item_key = d.item_key
+                WHERE f.item_key = i.item_key
                   AND f.field_name IN ({placeholders})
                   AND f.ordinal = 0
             ) < ?
-            ORDER BY d.item_key
+            ORDER BY i.item_key
             """,
             params,
         ).fetchall()
@@ -384,7 +336,7 @@ class LexicalIndex:
 
         for row in rows:
             try:
-                item = Item.model_validate_json(str(row["item_json"] or ""))
+                item = Item.model_validate_json(str(row["raw_json"] or ""))
             except Exception:
                 continue
             self._upsert_structured_rows(item)
@@ -392,19 +344,19 @@ class LexicalIndex:
     def _backfill_creator_rows(self) -> None:
         rows = self._conn.execute(
             """
-            SELECT d.item_key, d.item_json
-            FROM documents d
+            SELECT i.item_key, i.raw_json
+            FROM items i
             LEFT JOIN item_creators c
-              ON c.item_key = d.item_key
+              ON c.item_key = i.item_key
             WHERE c.item_key IS NULL
-            ORDER BY d.item_key
+            ORDER BY i.item_key
             """
         ).fetchall()
         if not rows:
             return
         for row in rows:
             try:
-                item = Item.model_validate_json(str(row["item_json"] or ""))
+                item = Item.model_validate_json(str(row["raw_json"] or ""))
             except Exception:
                 continue
             self._upsert_creator_rows(item)
@@ -412,41 +364,60 @@ class LexicalIndex:
     def _backfill_lexical_projection(self) -> None:
         rows = self._conn.execute(
             """
-            SELECT d.item_key, d.item_json, d.full_text
-            FROM documents d
+            SELECT i.item_key, i.raw_json
+            FROM items i
             LEFT JOIN lexical_docs ld
-              ON ld.item_key = d.item_key
+              ON ld.item_key = i.item_key
             WHERE ld.item_key IS NULL
-            ORDER BY d.item_key
+            ORDER BY i.item_key
             """
         ).fetchall()
         if not rows:
             return
         for row in rows:
             try:
-                item = Item.model_validate_json(str(row["item_json"] or ""))
+                item = Item.model_validate_json(str(row["raw_json"] or ""))
             except Exception:
                 continue
-            full_text = str(row["full_text"] or "")
+            full_text = self._full_text_from_chunks(str(row["item_key"]))
             self._upsert_lexical_projection(item, full_text=full_text)
 
-    def _backfill_items_table(self) -> None:
+    def _full_text_from_chunks(self, item_key: str) -> str:
         rows = self._conn.execute(
             """
-            SELECT d.item_key, d.item_json, d.item_type, d.title, d.date, d.doi_norm, d.lexical_hash, d.vector_hash,
-                   d.content_hash, d.lexical_profile_version, d.vector_profile_version
-            FROM documents d
-            LEFT JOIN items i
-              ON i.item_key = d.item_key
-            WHERE i.item_key IS NULL
-            ORDER BY d.item_key
-            """
+            SELECT text
+            FROM chunks
+            WHERE item_key = ?
+            ORDER BY ordinal
+            """,
+            (item_key,),
         ).fetchall()
         if not rows:
+            return ""
+        return "\n".join(str(row["text"] or "") for row in rows).strip()
+
+    def _migrate_legacy_documents_table(self) -> None:
+        if not self._table_exists("documents"):
+            return
+
+        rows = self._conn.execute("SELECT * FROM documents ORDER BY item_key").fetchall()
+        if not rows:
+            with self._conn:
+                self._conn.execute("DROP TABLE IF EXISTS documents")
             return
 
         with self._conn:
             for row in rows:
+                row_keys = set(row.keys())
+                raw_json = str(row["item_json"] or "{}") if "item_json" in row_keys else "{}"
+                try:
+                    item = Item.model_validate_json(raw_json)
+                except Exception:
+                    item = None
+                item_key = str(row["item_key"]) if "item_key" in row_keys else (item.key if item is not None else "")
+                if not item_key:
+                    continue
+
                 self._conn.execute(
                     """
                     INSERT INTO items(
@@ -468,62 +439,43 @@ class LexicalIndex:
                         updated_at=CURRENT_TIMESTAMP
                     """,
                     (
-                        str(row["item_key"]),
-                        row["item_type"],
-                        row["title"],
-                        row["date"],
-                        row["doi_norm"],
-                        str(row["item_json"] or "{}"),
-                        row["lexical_hash"],
-                        row["vector_hash"],
-                        row["content_hash"],
-                        row["lexical_profile_version"],
-                        row["vector_profile_version"],
+                        item_key,
+                        row["item_type"] if "item_type" in row_keys else (item.item_type if item is not None else None),
+                        row["title"] if "title" in row_keys else (item.title if item is not None else None),
+                        row["date"] if "date" in row_keys else (item.date if item is not None else None),
+                        (
+                            row["doi_norm"]
+                            if "doi_norm" in row_keys
+                            else self._normalize_doi(item.doi if item is not None else None)
+                        ),
+                        raw_json,
+                        row["lexical_hash"] if "lexical_hash" in row_keys else None,
+                        row["vector_hash"] if "vector_hash" in row_keys else None,
+                        row["content_hash"] if "content_hash" in row_keys else None,
+                        row["lexical_profile_version"] if "lexical_profile_version" in row_keys else None,
+                        row["vector_profile_version"] if "vector_profile_version" in row_keys else None,
                     ),
                 )
 
-    def _backfill_normalized_columns(self) -> None:
-        rows = self._conn.execute(
-            """
-            SELECT item_key, item_json
-            FROM documents
-            WHERE doi_norm IS NULL OR citation_key_norm IS NULL OR journal_norm IS NULL
-            """
-        ).fetchall()
-        if not rows:
-            return
+                if "full_text" in row_keys:
+                    full_text = str(row["full_text"] or "").strip()
+                    if full_text:
+                        existing_chunks = self._conn.execute(
+                            "SELECT COUNT(*) AS c FROM chunks WHERE item_key = ?",
+                            (item_key,),
+                        ).fetchone()
+                        if existing_chunks is not None and int(existing_chunks["c"]) == 0:
+                            chunk_id = f"{item_key}:legacy:0"
+                            self._conn.execute(
+                                "INSERT OR REPLACE INTO chunks(chunk_id, item_key, ordinal, text) VALUES (?, ?, ?, ?)",
+                                (chunk_id, item_key, 0, full_text),
+                            )
+                            self._conn.execute(
+                                "INSERT OR REPLACE INTO chunks_fts(chunk_id, item_key, text) VALUES (?, ?, ?)",
+                                (chunk_id, item_key, full_text),
+                            )
 
-        with self._conn:
-            for row in rows:
-                item_key = str(row["item_key"])
-                item_json = str(row["item_json"] or "")
-                doi = ""
-                citation_key = ""
-                journal = ""
-
-                try:
-                    item = Item.model_validate_json(item_json)
-                    doi = self._normalize_doi(item.doi)
-                    citation_key = self._normalize_citation_key(item.citation_key)
-                    journal = self._normalize_journal(item.journal)
-                except Exception:
-                    try:
-                        payload = json.loads(item_json)
-                    except Exception:
-                        payload = {}
-                    if isinstance(payload, dict):
-                        doi = self._normalize_doi(payload.get("doi"))  # type: ignore[arg-type]
-                        citation_key = self._normalize_citation_key(payload.get("citation_key"))  # type: ignore[arg-type]
-                        journal = self._normalize_journal(payload.get("journal"))  # type: ignore[arg-type]
-
-                self._conn.execute(
-                    """
-                    UPDATE documents
-                    SET doi_norm = ?, citation_key_norm = ?, journal_norm = ?
-                    WHERE item_key = ?
-                    """,
-                    (doi, citation_key, journal, item_key),
-                )
+            self._conn.execute("DROP TABLE IF EXISTS documents")
 
     @staticmethod
     def _creators_blob(item: Item) -> str:
@@ -608,7 +560,8 @@ class LexicalIndex:
             self._conn.execute("DELETE FROM item_creators")
             self._conn.execute("DELETE FROM identifiers")
             self._conn.execute("DELETE FROM item_fields")
-            self._conn.execute("DELETE FROM documents")
+            if self._table_exists("documents"):
+                self._conn.execute("DELETE FROM documents")
             self._conn.execute("DELETE FROM items")
 
     def document_count(self) -> int:
