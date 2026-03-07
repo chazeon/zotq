@@ -126,6 +126,74 @@ class HttpZoteroSourceAdapter(SourceAdapter):
             return None
         return parse_item(response.json())
 
+    def get_item_bibtex(self, key: str) -> str | None:
+        response = self._get(f"items/{key}", params={"format": "bibtex"}, allow_not_found=True)
+        if response is None:
+            return None
+        text = response.text.strip()
+        return text or None
+
+    def get_items_bibtex(self, keys: list[str]) -> str | None:
+        clean_keys = [key.strip() for key in keys if key and key.strip()]
+        if not clean_keys:
+            return None
+        response = self._get("items", params={"itemKey": ",".join(clean_keys), "format": "bibtex"})
+        if response is None:
+            return None
+        text = response.text.strip()
+        return text or None
+
+    def get_item_bibliography(
+        self,
+        key: str,
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        params: dict[str, object] = {"format": "bib"}
+        if style:
+            params["style"] = style
+        if locale:
+            params["locale"] = locale
+        if linkwrap is not None:
+            params["linkwrap"] = 1 if linkwrap else 0
+
+        response = self._get(f"items/{key}", params=params, allow_not_found=True)
+        if response is None:
+            return None
+        text = response.text.strip()
+        return text or None
+
+    def get_items_bibliography(
+        self,
+        keys: list[str],
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        clean_keys = [key.strip() for key in keys if key and key.strip()]
+        if not clean_keys:
+            return None
+
+        params: dict[str, object] = {
+            "itemKey": ",".join(clean_keys),
+            "format": "bib",
+        }
+        if style:
+            params["style"] = style
+        if locale:
+            params["locale"] = locale
+        if linkwrap is not None:
+            params["linkwrap"] = 1 if linkwrap else 0
+
+        response = self._get("items", params=params)
+        if response is None:
+            return None
+        text = response.text.strip()
+        return text or None
+
     def count_items(self) -> int | None:
         response = self._get("items", params={"limit": 1, "start": 0})
         if response is None:
@@ -207,7 +275,10 @@ class HttpZoteroSourceAdapter(SourceAdapter):
 
         # If local-only filters are requested, we need broader scan then local filtering.
         needs_local_filter_scan = bool(
-            query.creators
+            query.doi
+            or query.journal
+            or query.citation_key
+            or query.creators
             or query.year_from is not None
             or query.year_to is not None
             or query.title is not None

@@ -24,6 +24,7 @@ MOCK_ITEMS: list[Item] = [
         creators=[Creator(first_name="Masayuki", last_name="Nishi")],
         tags=["mantle", "hydration"],
         abstract="The fate of water in subducting slabs and lower mantle reservoirs.",
+        citation_key="nishiMantleHydration2015",
     ),
     Item(
         key="XJP5WU22",
@@ -62,6 +63,9 @@ def _blob(item: Item) -> str:
     parts = [
         item.title or "",
         item.abstract or "",
+        item.doi or "",
+        item.journal or "",
+        item.citation_key or "",
         " ".join(item.tags),
         creators,
         item.date or "",
@@ -94,6 +98,56 @@ class MockSourceAdapter:
             if item.key == key:
                 return item
         return None
+
+    def get_item_bibtex(self, key: str) -> str | None:
+        item = self.get_item(key)
+        if item is None:
+            return None
+        citekey = item.citation_key or f"{item.key.lower()}Key"
+        title = item.title or item.key
+        return f"@article{{{citekey},\n  title = {{{title}}},\n}}\n"
+
+    def get_items_bibtex(self, keys: list[str]) -> str | None:
+        entries: list[str] = []
+        for key in keys:
+            entry = self.get_item_bibtex(key)
+            if entry:
+                entries.append(entry.strip())
+        if not entries:
+            return None
+        return "\n\n".join(entries)
+
+    def get_item_bibliography(
+        self,
+        key: str,
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        item = self.get_item(key)
+        if item is None:
+            return None
+        style_prefix = f"[{style}] " if style else ""
+        locale_suffix = f" ({locale})" if locale else ""
+        return f"{style_prefix}{item.title or item.key}{locale_suffix}"
+
+    def get_items_bibliography(
+        self,
+        keys: list[str],
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        entries: list[str] = []
+        for key in keys:
+            entry = self.get_item_bibliography(key, style=style, locale=locale, linkwrap=linkwrap)
+            if entry:
+                entries.append(entry)
+        if not entries:
+            return None
+        return "\n\n".join(entries)
 
     def list_collections(self) -> list[Collection]:
         return list(MOCK_COLLECTIONS)
@@ -155,6 +209,15 @@ class MockSourceAdapter:
         if query.title and query.title.lower() not in (item.title or "").lower():
             return False
 
+        if query.doi and (self._normalize_doi(query.doi) != self._normalize_doi(item.doi)):
+            return False
+
+        if query.journal and query.journal.lower() not in (item.journal or "").lower():
+            return False
+
+        if query.citation_key and query.citation_key.strip().lower() != (item.citation_key or "").strip().lower():
+            return False
+
         if query.item_type and query.item_type != item.item_type:
             return False
 
@@ -182,6 +245,17 @@ class MockSourceAdapter:
             return False
 
         return True
+
+    @staticmethod
+    def _normalize_doi(value: str | None) -> str:
+        raw = (value or "").strip().lower()
+        if raw.startswith("https://doi.org/"):
+            raw = raw[len("https://doi.org/") :]
+        if raw.startswith("http://doi.org/"):
+            raw = raw[len("http://doi.org/") :]
+        if raw.startswith("doi:"):
+            raw = raw[4:]
+        return raw.strip()
 
     def _score_item(self, item: Item, query: QuerySpec) -> float:
         if not query.text:

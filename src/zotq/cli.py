@@ -11,7 +11,7 @@ from .client import ZotQueryClient
 from .config import apply_cli_overrides, load_app_config
 from .contracts import build_cli_api_contract
 from .errors import BackendConnectionError, ConfigError, IndexNotReadyError, ModeNotSupportedError
-from .models import AppConfig, Mode, OutputFormat, QuerySpec, SearchDefaultsConfig, SearchMode, SearchResult
+from .models import AppConfig, Mode, OutputFormat, QuerySpec, SearchBackend, SearchDefaultsConfig, SearchMode, SearchResult
 from .output import render_payload
 
 
@@ -67,6 +67,7 @@ def _build_search_debug_payload(result: SearchResult, query: QuerySpec) -> dict[
         "attachments_in_hits": attachments_in_hits,
         "normalized_components_present": normalized_components_present,
         "candidate_limits": {
+            "backend": query.backend.value,
             "limit": query.limit,
             "offset": query.offset,
             "lexical_k": query.lexical_k,
@@ -185,9 +186,13 @@ def search_group() -> None:
 @search_group.command("run")
 @click.argument("query", required=False)
 @click.option("text", "--text", type=str, default=None)
+@click.option("backend", "--backend", type=click.Choice([b.value for b in SearchBackend]), default=None)
 @click.option("search_mode", "--search-mode", type=click.Choice([m.value for m in SearchMode]), default=None)
 @click.option("allow_fallback", "--allow-fallback/--no-allow-fallback", default=None)
 @click.option("title", "--title", type=str, default=None)
+@click.option("doi", "--doi", type=str, default=None)
+@click.option("journal", "--journal", type=str, default=None)
+@click.option("citation_key", "--citation-key", type=str, default=None)
 @click.option("creators", "--creator", type=str, multiple=True)
 @click.option("tags", "--tag", type=str, multiple=True)
 @click.option("collection", "--collection", type=str, default=None)
@@ -197,6 +202,9 @@ def search_group() -> None:
 @click.option("alpha", "--alpha", type=float, default=None)
 @click.option("lexical_k", "--lexical-k", type=int, default=None)
 @click.option("vector_k", "--vector-k", type=int, default=None)
+@click.option("style", "--style", type=str, default=None, help="Citation style for bibliography output.")
+@click.option("locale", "--locale", type=str, default=None, help="Locale for bibliography output.")
+@click.option("linkwrap", "--linkwrap/--no-linkwrap", default=None, help="Wrap bibliography entries with links.")
 @click.option("debug", "--debug/--no-debug", default=False, help="Include ranking debug payload.")
 @click.option("limit", "--limit", type=int, default=20)
 @click.option("offset", "--offset", type=int, default=0)
@@ -205,9 +213,13 @@ def search_run(
     runtime: RuntimeContext,
     query: str | None,
     text: str | None,
+    backend: str | None,
     search_mode: str | None,
     allow_fallback: bool | None,
     title: str | None,
+    doi: str | None,
+    journal: str | None,
+    citation_key: str | None,
     creators: tuple[str, ...],
     tags: tuple[str, ...],
     collection: str | None,
@@ -217,20 +229,29 @@ def search_run(
     alpha: float | None,
     lexical_k: int | None,
     vector_k: int | None,
+    style: str | None,
+    locale: str | None,
+    linkwrap: bool | None,
     debug: bool,
     limit: int,
     offset: int,
 ) -> None:
     if query and text and query != text:
         raise click.ClickException("Pass either QUERY or --text, or use the same value.")
+    if runtime.output == OutputFormat.BIBTEX and (style or locale or linkwrap is not None):
+        raise click.ClickException("--style/--locale/--linkwrap are only supported with --output bib.")
 
     defaults = runtime.search_defaults
 
     query_spec = QuerySpec(
         text=text or query,
+        backend=SearchBackend(backend) if backend else SearchBackend.AUTO,
         search_mode=SearchMode(search_mode) if search_mode else defaults.default_mode,
         allow_fallback=allow_fallback if allow_fallback is not None else defaults.allow_fallback,
         title=title,
+        doi=doi,
+        journal=journal,
+        citation_key=citation_key,
         creators=list(creators),
         year_from=year_from,
         year_to=year_to,
@@ -250,6 +271,17 @@ def search_run(
     except (ModeNotSupportedError, BackendConnectionError, IndexNotReadyError) as exc:
         raise click.ClickException(str(exc)) from exc
 
+    if runtime.output == OutputFormat.BIB:
+        keys = [hit.item.key for hit in result.hits]
+        entries = runtime.client.get_items_bibliography(keys, style=style, locale=locale, linkwrap=linkwrap)
+        click.echo(render_payload("\n\n".join(entries), runtime.output))
+        return
+    if runtime.output == OutputFormat.BIBTEX:
+        keys = [hit.item.key for hit in result.hits]
+        entries = runtime.client.get_items_bibtex(keys)
+        click.echo(render_payload("\n\n".join(entries), runtime.output))
+        return
+
     payload = result.model_dump(mode="json")
     payload["query"] = query_spec.model_dump(mode="json")
     if debug:
@@ -264,13 +296,37 @@ def item_group() -> None:
 
 @item_group.command("get")
 @click.argument("key", required=True)
+@click.option("style", "--style", type=str, default=None, help="Citation style for bibliography output.")
+@click.option("locale", "--locale", type=str, default=None, help="Locale for bibliography output.")
+@click.option("linkwrap", "--linkwrap/--no-linkwrap", default=None, help="Wrap bibliography entries with links.")
 @pass_runtime
-def item_get(runtime: RuntimeContext, key: str) -> None:
+def item_get(runtime: RuntimeContext, key: str, style: str | None, locale: str | None, linkwrap: bool | None) -> None:
     try:
+        if runtime.output == OutputFormat.BIB:
+            bibliography_payload = runtime.client.get_item_bibliography(key, style=style, locale=locale, linkwrap=linkwrap)
+            click.echo(render_payload(bibliography_payload, runtime.output))
+            return
+        if runtime.output == OutputFormat.BIBTEX:
+            if style or locale or linkwrap is not None:
+                raise click.ClickException("--style/--locale/--linkwrap are only supported with --output bib.")
+            bibtex = runtime.client.get_item_bibtex(key)
+            click.echo(render_payload(bibtex or "", runtime.output))
+            return
         item = runtime.client.get_item(key)
     except (BackendConnectionError, IndexNotReadyError) as exc:
         raise click.ClickException(str(exc)) from exc
     payload = {"found": item is not None, "item": item.model_dump(mode="json") if item else None}
+    click.echo(render_payload(payload, runtime.output))
+
+
+@item_group.command("citekey")
+@click.argument("key", required=True)
+@pass_runtime
+def item_citekey(runtime: RuntimeContext, key: str) -> None:
+    try:
+        payload = runtime.client.get_item_citation_key(key)
+    except (BackendConnectionError, IndexNotReadyError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(render_payload(payload, runtime.output))
 
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+import re
 
 from .factory import build_index_service, build_source_adapter
 from .index_service import MockIndexService
-from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchMode, SearchResult, Tag
+from .models import AppConfig, BackendCapabilities, Collection, Item, QuerySpec, SearchBackend, SearchMode, SearchResult, Tag
 from .query_engine import QueryEngine
 from .sources import SourceAdapter
 
@@ -51,19 +52,27 @@ class ZotQueryClient:
         }
 
     def search(self, query: QuerySpec) -> SearchResult:
-        capabilities = self._source.capabilities()
+        source_capabilities = self._source.capabilities()
         index_capabilities = self._index.capabilities()
         index_status = self._index.status()
 
-        effective_capabilities = BackendCapabilities(
-            keyword=capabilities.keyword or index_capabilities.keyword,
-            fuzzy=capabilities.fuzzy or index_capabilities.fuzzy,
-            semantic=capabilities.semantic and index_status.enabled and index_status.ready,
-            hybrid=capabilities.hybrid and index_status.enabled and index_status.ready,
-            index_status=capabilities.index_status and index_capabilities.index_status,
-            index_sync=capabilities.index_sync and index_capabilities.index_sync,
-            index_rebuild=capabilities.index_rebuild and index_capabilities.index_rebuild,
-        )
+        if query.backend == SearchBackend.SOURCE:
+            effective_capabilities = source_capabilities
+            forced_route = "source"
+        elif query.backend == SearchBackend.INDEX:
+            effective_capabilities = index_capabilities
+            forced_route = "index"
+        else:
+            effective_capabilities = BackendCapabilities(
+                keyword=source_capabilities.keyword or index_capabilities.keyword,
+                fuzzy=source_capabilities.fuzzy or index_capabilities.fuzzy,
+                semantic=index_capabilities.semantic,
+                hybrid=index_capabilities.hybrid,
+                index_status=source_capabilities.index_status and index_capabilities.index_status,
+                index_sync=source_capabilities.index_sync and index_capabilities.index_sync,
+                index_rebuild=source_capabilities.index_rebuild and index_capabilities.index_rebuild,
+            )
+            forced_route = None
 
         executed_mode = QueryEngine.resolve_execution_mode(
             requested=query.search_mode,
@@ -74,7 +83,8 @@ class ZotQueryClient:
         executed_query = query.model_copy(deep=True)
         executed_query.search_mode = executed_mode
 
-        if getattr(index_capabilities, executed_mode.value, False):
+        route = forced_route or ("index" if getattr(index_capabilities, executed_mode.value, False) else "source")
+        if route == "index":
             hits = self._index.search(executed_query)
         else:
             hits = self._source.search_items(executed_query)
@@ -90,6 +100,108 @@ class ZotQueryClient:
 
     def get_item(self, key: str) -> Item | None:
         return self._source.get_item(key)
+
+    @staticmethod
+    def _citation_key_from_extra(extra: str | None) -> str | None:
+        if not extra:
+            return None
+        match = re.search(r"(?im)^\s*citation\s*key\s*:\s*(\S+)\s*$", extra)
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    @staticmethod
+    def _citation_key_from_bibtex(bibtex: str | None) -> str | None:
+        if not bibtex:
+            return None
+        match = re.search(r"@\w+\s*\{\s*([^,\s]+)\s*,", bibtex)
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    def get_item_citation_key(self, key: str) -> dict[str, str | bool | None]:
+        item = self.get_item(key)
+        if item is None:
+            return {"found": False, "item_key": key, "citation_key": None, "source": None}
+
+        if item.citation_key:
+            return {
+                "found": True,
+                "item_key": key,
+                "citation_key": item.citation_key,
+                "source": "item.citation_key",
+            }
+
+        from_extra = self._citation_key_from_extra(item.extra)
+        if from_extra:
+            return {
+                "found": True,
+                "item_key": key,
+                "citation_key": from_extra,
+                "source": "item.extra",
+            }
+
+        from_bibtex = self._citation_key_from_bibtex(self._source.get_item_bibtex(key))
+        if from_bibtex:
+            return {
+                "found": True,
+                "item_key": key,
+                "citation_key": from_bibtex,
+                "source": "bibtex",
+            }
+
+        return {"found": True, "item_key": key, "citation_key": None, "source": None}
+
+    def get_item_bibliography(
+        self,
+        key: str,
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> dict[str, str | bool | None]:
+        bibliography = self._source.get_item_bibliography(key, style=style, locale=locale, linkwrap=linkwrap)
+        return {
+            "found": bibliography is not None,
+            "item_key": key,
+            "style": style,
+            "locale": locale,
+            "linkwrap": linkwrap,
+            "bibliography": bibliography,
+        }
+
+    def get_item_bibtex(self, key: str) -> str | None:
+        return self._source.get_item_bibtex(key)
+
+    def get_items_bibtex(self, keys: list[str]) -> list[str]:
+        merged = self._source.get_items_bibtex(keys)
+        if merged:
+            return [merged]
+        entries: list[str] = []
+        for key in keys:
+            entry = self._source.get_item_bibtex(key)
+            if entry:
+                entries.append(entry)
+        return entries
+
+    def get_items_bibliography(
+        self,
+        keys: list[str],
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> list[str]:
+        merged = self._source.get_items_bibliography(keys, style=style, locale=locale, linkwrap=linkwrap)
+        if merged:
+            return [merged]
+
+        entries: list[str] = []
+        for key in keys:
+            bibliography = self._source.get_item_bibliography(key, style=style, locale=locale, linkwrap=linkwrap)
+            if bibliography:
+                entries.append(bibliography)
+        return entries
 
     def list_collections(self) -> list[Collection]:
         return self._source.list_collections()

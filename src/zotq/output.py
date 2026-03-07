@@ -148,6 +148,19 @@ def _render_table(payload: Any) -> str:
 
 
 def render_payload(payload: Any, output_format: OutputFormat) -> str:
+    if output_format in {OutputFormat.BIB, OutputFormat.BIBTEX}:
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, dict):
+            bibliography = payload.get("bibliography")
+            if isinstance(bibliography, str):
+                return bibliography
+            if bibliography is None:
+                return ""
+        if isinstance(payload, list):
+            return "\n\n".join(str(item) for item in payload)
+        return str(payload)
+
     if output_format == OutputFormat.JSON:
         return json.dumps(payload, indent=2, default=_json_default)
 

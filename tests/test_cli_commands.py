@@ -166,6 +166,251 @@ def test_search_run_debug_emits_debug_payload() -> None:
 
 
 @respx.mock
+def test_search_run_accepts_doi_journal_and_citation_key_flags() -> None:
+    respx.get("http://remote.test/users/0/items").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "key": "XVMVWQZX",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "Thermodynamics with the Gruneisen parameter",
+                        "date": "2019",
+                        "DOI": "10.1016/j.pepi.2018.10.006",
+                        "publicationTitle": "Physics of the Earth and Planetary Interiors",
+                        "citationKey": "staceyThermodynamicsGruneisenParameter2019",
+                    },
+                }
+            ],
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "search",
+            "run",
+            "--doi",
+            "doi:10.1016/j.pepi.2018.10.006",
+            "--journal",
+            "planetary interiors",
+            "--citation-key",
+            "staceythermodynamicsgruneisenparameter2019",
+            "--limit",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["query"]["doi"] == "doi:10.1016/j.pepi.2018.10.006"
+    assert payload["query"]["journal"] == "planetary interiors"
+    assert payload["query"]["citation_key"] == "staceythermodynamicsgruneisenparameter2019"
+    assert payload["query"]["backend"] == "auto"
+
+
+@respx.mock
+def test_search_run_accepts_backend_flag() -> None:
+    respx.get("http://remote.test/users/0/items").mock(return_value=Response(200, json=[]))
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "search",
+            "run",
+            "mantle",
+            "--backend",
+            "source",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["query"]["backend"] == "source"
+
+
+@respx.mock
+def test_item_citekey_returns_citation_key() -> None:
+    respx.get("http://remote.test/users/0/items/XVMVWQZX").mock(
+        return_value=Response(
+            200,
+            json={
+                "key": "XVMVWQZX",
+                "data": {
+                    "itemType": "journalArticle",
+                    "title": "Thermodynamics with the Gruneisen parameter",
+                    "citationKey": "staceyThermodynamicsGruneisenParameter2019",
+                },
+            },
+        )
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "item", "citekey", "XVMVWQZX"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["found"] is True
+    assert payload["item_key"] == "XVMVWQZX"
+    assert payload["citation_key"] == "staceyThermodynamicsGruneisenParameter2019"
+    assert payload["source"] == "item.citation_key"
+
+
+@respx.mock
+def test_item_get_bib_output_uses_bibliography_endpoint() -> None:
+    respx.get(
+        "http://remote.test/users/0/items/XVMVWQZX",
+        params={"format": "bib", "style": "apa", "locale": "en-US", "linkwrap": 1},
+    ).mock(return_value=Response(200, text="<div class='csl-entry'>Stacey and Hodgkinson (2019)</div>"))
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bib",
+            "item",
+            "get",
+            "XVMVWQZX",
+            "--style",
+            "apa",
+            "--locale",
+            "en-US",
+            "--linkwrap",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Stacey and Hodgkinson" in result.output
+
+
+@respx.mock
+def test_search_run_bib_output_joins_bibliography_entries() -> None:
+    respx.get(
+        "http://remote.test/users/0/items",
+        params={"q": "ref", "qmode": "titleCreatorYear", "limit": 100, "start": 0},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K1", "data": {"itemType": "journalArticle", "title": "First"}},
+                {"key": "K2", "data": {"itemType": "journalArticle", "title": "Second"}},
+            ],
+        )
+    )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,K2", "format": "bib"}).mock(
+        return_value=Response(200, text="<div class='csl-entry'>First Ref</div>\n<div class='csl-entry'>Second Ref</div>")
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bib",
+            "search",
+            "run",
+            "ref",
+            "--search-mode",
+            "keyword",
+            "--limit",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "First Ref" in result.output
+    assert "Second Ref" in result.output
+
+
+@respx.mock
+def test_item_get_bibtex_output_uses_bibtex_endpoint() -> None:
+    respx.get("http://remote.test/users/0/items/XVMVWQZX", params={"format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{staceyThermodynamicsGruneisenParameter2019,}")
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bibtex",
+            "item",
+            "get",
+            "XVMVWQZX",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "@article{staceyThermodynamicsGruneisenParameter2019" in result.output
+
+
+@respx.mock
+def test_search_run_bibtex_output_uses_batch_bibtex_endpoint() -> None:
+    respx.get(
+        "http://remote.test/users/0/items",
+        params={"q": "ref", "qmode": "titleCreatorYear", "limit": 100, "start": 0},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K1", "data": {"itemType": "journalArticle", "title": "First"}},
+                {"key": "K2", "data": {"itemType": "journalArticle", "title": "Second"}},
+            ],
+        )
+    )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,K2", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{firstRef,}\n\n@article{secondRef,}")
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bibtex",
+            "search",
+            "run",
+            "ref",
+            "--search-mode",
+            "keyword",
+            "--limit",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "@article{firstRef" in result.output
+    assert "@article{secondRef" in result.output
+
+
+def test_item_get_bibtex_rejects_csl_flags() -> None:
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bibtex",
+            "item",
+            "get",
+            "XVMVWQZX",
+            "--style",
+            "apa",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "only supported with --output bib" in result.output
+
+
+@respx.mock
 def test_index_sync_full_returns_ready_status() -> None:
     respx.get("http://remote.test/users/0/items").mock(
         return_value=Response(

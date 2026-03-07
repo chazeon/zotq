@@ -28,6 +28,32 @@ class SourceAdapter(Protocol):
     def get_item(self, key: str) -> Item | None:
         ...
 
+    def get_item_bibtex(self, key: str) -> str | None:
+        ...
+
+    def get_items_bibtex(self, keys: list[str]) -> str | None:
+        ...
+
+    def get_item_bibliography(
+        self,
+        key: str,
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        ...
+
+    def get_items_bibliography(
+        self,
+        keys: list[str],
+        *,
+        style: str | None = None,
+        locale: str | None = None,
+        linkwrap: bool | None = None,
+    ) -> str | None:
+        ...
+
     def list_collections(self) -> list[Collection]:
         ...
 

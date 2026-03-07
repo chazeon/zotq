@@ -10,6 +10,7 @@ def test_v1_command_contract_contains_expected_commands() -> None:
     assert "system health" in names
     assert "search run" in names
     assert "item get" in names
+    assert "item citekey" in names
     assert "collection list" in names
     assert "tag list" in names
     assert "index status" in names
@@ -34,4 +35,4 @@ def test_global_options_are_explicit() -> None:
 
     assert "-c, --config PATH" in contract.global_options
     assert "--mode [local-api|remote]" in contract.global_options
-    assert "--output [table|json|jsonl]" in contract.global_options
+    assert "--output [table|json|jsonl|bib|bibtex]" in contract.global_options
