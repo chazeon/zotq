@@ -190,6 +190,7 @@ When an adapter exposes watermark/cursor paging, `zotq` uses that checkpoint pat
 `index inspect` reports structured-field coverage from the registry-backed store (including DOI, citation key, journal, ISSN, volume, pages, language, and journal abbreviation) with sample item keys.
 It also reports lexical/vector profile-version mismatch counts and sample mismatched item keys against the configured `lexical_profile_version` and `vector_profile_version` targets.
 For vector backend cutovers, `index inspect` includes `vector_backend` and `vector_migration` summary fields (legacy rows detected/migrated).
+`index status` includes a `preflight` block for agentic runs with `offline_ready`, `requires_network_for_query`, `embedding_provider_local`, `vector_backend`, and `degraded_capabilities`.
 
 ### Migration Status
 - Current status: migration cutover complete; runtime is `items`-only.

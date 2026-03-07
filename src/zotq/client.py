@@ -642,6 +642,37 @@ class ZotQueryClient:
     def index_inspect(self, *, sample_limit: int = 5) -> dict[str, object]:
         return self._index.inspect_index(sample_limit=sample_limit)
 
+    def index_preflight(self) -> dict[str, object]:
+        status = self._index.status()
+        inspect = self._index.inspect_index(sample_limit=0)
+
+        provider = (self._profile.index.embedding_provider or "local").strip().lower()
+        embedding_provider_local = provider == "local"
+        requires_network_for_query = not embedding_provider_local
+
+        degraded: list[str] = []
+        if requires_network_for_query:
+            degraded.append("embedding_provider_remote")
+        if not status.ready:
+            degraded.append("index_not_ready")
+
+        migration_payload = inspect.get("vector_migration")
+        if isinstance(migration_payload, dict):
+            legacy_rows = self._as_int(migration_payload.get("legacy_rows"), default=0)
+            migrated_rows = self._as_int(migration_payload.get("migrated_rows"), default=0)
+            if legacy_rows > migrated_rows:
+                degraded.append("vector_migration_incomplete")
+
+        offline_ready = bool(status.ready and embedding_provider_local and "vector_migration_incomplete" not in degraded)
+        return {
+            "offline_ready": offline_ready,
+            "requires_network_for_query": requires_network_for_query,
+            "embedding_provider_local": embedding_provider_local,
+            "vector_backend": self._profile.index.vector_backend.value,
+            "vector_migration": migration_payload if isinstance(migration_payload, dict) else {},
+            "degraded_capabilities": sorted(set(degraded)),
+        }
+
     @staticmethod
     def _as_int(value: object, *, default: int = 0) -> int:
         if isinstance(value, bool):

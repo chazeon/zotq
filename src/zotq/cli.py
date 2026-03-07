@@ -501,6 +501,7 @@ def index_group() -> None:
 def index_status(runtime: RuntimeContext) -> None:
     try:
         payload = runtime.client.index_status().model_dump(mode="json")
+        payload["preflight"] = runtime.client.index_preflight()
     except BackendConnectionError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(render_payload(payload, runtime.output))

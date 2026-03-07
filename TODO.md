@@ -13,7 +13,8 @@ Status values: `todo`, `in_progress`, `done`.
 - [x] `S6` (`done`) Execute `T2.3`: deterministic BibTeX stringify policy + output integration tests.
 - [x] `S7` (`done`) Execute `T3.1`: vector backend abstraction (`python|sqlite-vec`) + parity tests.
 - [x] `S8` (`done`) Execute `T3.2`: migration/backfill path for sqlite-vec cutover.
-- [ ] `S9` (`in_progress`) Start `T3.3`: preflight readiness output for vector backend state.
+- [x] `S9` (`done`) Execute `T3.3`: preflight readiness output for vector backend state.
+- [ ] `S10` (`in_progress`) Start `T4.1`: portable local embedding provider path.
 
 ## P0 Contracts and Benchmarks
 
@@ -67,13 +68,13 @@ Status values: `todo`, `in_progress`, `done`.
   - Files: `src/zotq/storage/vector_index.py`, `src/zotq/index_service.py`.
   - Tests: `tests/test_vector_migration.py`.
 
-- [ ] `T3.3` (`in_progress`) Add preflight readiness output for vector backend state.
+- [x] `T3.3` (`done`) Add preflight readiness output for vector backend state.
   - Files: `src/zotq/client.py`, `src/zotq/cli.py`.
   - Tests: `tests/test_agentic_preflight.py`.
 
 ## P4 Portable Local Embeddings and Guards
 
-- [ ] `T4.1` (`todo`) Add local portable embedding provider (`fastembed`-class) with explicit fallback.
+- [ ] `T4.1` (`in_progress`) Add local portable embedding provider (`fastembed`-class) with explicit fallback.
   - Files: `src/zotq/embeddings/factory.py`, new provider module.
   - Tests: `tests/test_embedding_provider.py`.
 
