@@ -174,3 +174,85 @@ def test_full_sync_resumes_from_checkpoint_after_interruption(tmp_path: Path, mo
         assert "last_sync_at" in payload
     finally:
         resumed_service.close()
+
+
+def test_vector_profile_version_bump_triggers_reembed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base_cfg = IndexConfig(
+        index_dir=str(tmp_path / "index"),
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=1,
+        vector_profile_version=1,
+    )
+    items = [Item(key="K1", title="One", abstract="A")]
+
+    service = MockIndexService(base_cfg)
+    try:
+        service.sync(full=True, items=items)
+    finally:
+        service.close()
+
+    bumped_cfg = IndexConfig(
+        index_dir=base_cfg.index_dir,
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=1,
+        vector_profile_version=2,
+    )
+    bumped = MockIndexService(bumped_cfg)
+    try:
+        calls = {"count": 0}
+        original_embed_texts = bumped._embedding.embed_texts  # type: ignore[attr-defined]
+
+        def counting_embed_texts(texts: list[str]) -> list[list[float]]:
+            calls["count"] += 1
+            return original_embed_texts(texts)
+
+        monkeypatch.setattr(bumped._embedding, "embed_texts", counting_embed_texts)  # type: ignore[attr-defined]
+        bumped.sync(full=False, items=items)
+        assert calls["count"] == 1
+    finally:
+        bumped.close()
+
+
+def test_lexical_profile_version_bump_skips_reembed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base_cfg = IndexConfig(
+        index_dir=str(tmp_path / "index"),
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=1,
+        vector_profile_version=1,
+    )
+    items = [Item(key="K1", title="One", abstract="A")]
+
+    service = MockIndexService(base_cfg)
+    try:
+        service.sync(full=True, items=items)
+    finally:
+        service.close()
+
+    bumped_cfg = IndexConfig(
+        index_dir=base_cfg.index_dir,
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=2,
+        vector_profile_version=1,
+    )
+    bumped = MockIndexService(bumped_cfg)
+    try:
+        calls = {"count": 0}
+        original_embed_texts = bumped._embedding.embed_texts  # type: ignore[attr-defined]
+
+        def counting_embed_texts(texts: list[str]) -> list[list[float]]:
+            calls["count"] += 1
+            return original_embed_texts(texts)
+
+        monkeypatch.setattr(bumped._embedding, "embed_texts", counting_embed_texts)  # type: ignore[attr-defined]
+        bumped.sync(full=False, items=items)
+        assert calls["count"] == 0
+    finally:
+        bumped.close()

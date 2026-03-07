@@ -128,6 +128,8 @@ Click CLI
   - `index sync` updates changed items with split hash checks:
     - lexical hash for metadata/FTS updates.
     - vector hash for semantic embedding refresh.
+    - lexical/vector profile versions can force targeted reprocessing when mappings/chunk policy changes.
+  - Source collection checkpoints (`scope`, `full`, `next_offset`, `collected_keys`) enable resume before ingest.
   - Per-item ingest checkpoints (`mode`, `done`, `total`, `remaining_keys`) enable interruption-safe resume on next `index sync`.
   - `index sync --full` and `index rebuild` force full reprocessing.
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
@@ -499,6 +501,8 @@ verify_tls = true
 - `ZOTQ_SEARCH_MODE`
 - `ZOTQ_ALLOW_FALLBACK`
 - `ZOTQ_INDEX_DIR`
+- `ZOTQ_LEXICAL_PROFILE_VERSION`
+- `ZOTQ_VECTOR_PROFILE_VERSION`
 - `ZOTQ_EMBEDDING_PROVIDER`
 - `ZOTQ_EMBEDDING_MODEL`
 - `ZOTQ_EMBEDDING_BASE_URL`
@@ -631,3 +635,17 @@ src/zotq/
 - `index status/inspect/sync/rebuild/enrich` provide actionable output.
 - JSON output schema is stable across modes.
 - No live Zotero DB reads are required.
+
+## 17. Next Milestones (Unfinished)
+1. Complete v2 schema split:
+   - Move canonical metadata from `documents` into an `items`-first table model.
+   - Keep compatibility read paths until migration is validated.
+2. Add projection/version migration controls:
+   - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
+   - Provide explicit migration command/reporting for version mismatch counts.
+3. Improve source checkpointing fidelity:
+   - Add source watermark/checkpoint support beyond offset paging where adapters can provide it.
+   - Ensure restart logic handles source-order drift safely.
+4. Post-v1 feature roadmap:
+   - Introduce low-risk mutation commands (`collection add-item/remove-item`, `tag add/remove`) with `--dry-run`/`--yes`.
+   - Keep MCP integration as separate phase after CLI contracts stabilize.

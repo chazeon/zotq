@@ -56,6 +56,8 @@ vector_k = 100
 [profiles.default.index]
 enabled = true
 index_dir = "~/.local/share/zotq/index"
+lexical_profile_version = 1
+vector_profile_version = 1
 embedding_provider = "local"
 embedding_model = "local-hash-v1"
 embedding_base_url = ""
@@ -83,6 +85,8 @@ Useful vars:
 - `ZOTQ_MODE`
 - `ZOTQ_OUTPUT`
 - `ZOTQ_INDEX_DIR`
+- `ZOTQ_LEXICAL_PROFILE_VERSION`
+- `ZOTQ_VECTOR_PROFILE_VERSION`
 - `ZOTQ_EMBEDDING_PROVIDER`
 - `ZOTQ_EMBEDDING_MODEL`
 - `ZOTQ_EMBEDDING_BASE_URL`
@@ -166,6 +170,7 @@ Use `--no-progress` to disable it.
 - vector hash controls chunk re-embedding.
 - metadata-only changes (for example DOI/journal/citation key) update lexical metadata without forcing vector re-embedding.
 Interrupted syncs now persist per-item ingest checkpoints and resume on the next run (including `--full`) without restarting from item zero.
+Source collection progress (`offset` + collected item keys) is also checkpointed, so retries can resume collection before ingest.
 `index sync --full` clears and rebuilds lexical/vector indexes from scratch.
 `index enrich` updates metadata in place without rebuilding vectors.
 - `--field citation-key` (default): BBT RPC/BibTeX fallback enrichment.

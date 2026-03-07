@@ -64,6 +64,8 @@ class LexicalIndex:
                 content_hash TEXT,
                 lexical_hash TEXT,
                 vector_hash TEXT,
+                lexical_profile_version INTEGER,
+                vector_profile_version INTEGER,
                 doi_norm TEXT,
                 citation_key_norm TEXT,
                 journal_norm TEXT
@@ -147,6 +149,10 @@ class LexicalIndex:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN lexical_hash TEXT")
             if "vector_hash" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN vector_hash TEXT")
+            if "lexical_profile_version" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN lexical_profile_version INTEGER")
+            if "vector_profile_version" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN vector_profile_version INTEGER")
             if "doi_norm" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN doi_norm TEXT")
                 normalized_changed = True
@@ -460,6 +466,8 @@ class LexicalIndex:
         content_hash: str | None = None,
         lexical_hash: str | None = None,
         vector_hash: str | None = None,
+        lexical_profile_version: int | None = None,
+        vector_profile_version: int | None = None,
     ) -> None:
         item_json = item.model_dump_json()
         creators_blob = self._creators_blob(item)
@@ -473,9 +481,10 @@ class LexicalIndex:
                 """
                 INSERT INTO documents(
                     item_key, item_json, title, item_type, date, creators, tags, full_text,
-                    content_hash, lexical_hash, vector_hash, doi_norm, citation_key_norm, journal_norm
+                    content_hash, lexical_hash, vector_hash, lexical_profile_version, vector_profile_version,
+                    doi_norm, citation_key_norm, journal_norm
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(item_key) DO UPDATE SET
                     item_json=excluded.item_json,
                     title=excluded.title,
@@ -487,6 +496,8 @@ class LexicalIndex:
                     content_hash=excluded.content_hash,
                     lexical_hash=excluded.lexical_hash,
                     vector_hash=excluded.vector_hash,
+                    lexical_profile_version=excluded.lexical_profile_version,
+                    vector_profile_version=excluded.vector_profile_version,
                     doi_norm=excluded.doi_norm,
                     citation_key_norm=excluded.citation_key_norm,
                     journal_norm=excluded.journal_norm
@@ -503,6 +514,8 @@ class LexicalIndex:
                     content_hash,
                     lexical_hash,
                     vector_hash,
+                    lexical_profile_version,
+                    vector_profile_version,
                     doi_norm,
                     citation_key_norm,
                     journal_norm,
@@ -696,6 +709,25 @@ class LexicalIndex:
         content_hash = str(row["content_hash"]) if row["content_hash"] else None
         return lexical_hash, vector_hash, content_hash
 
+    def get_item_sync_state(self, item_key: str) -> tuple[str | None, str | None, str | None, int | None, int | None]:
+        row = self._conn.execute(
+            """
+            SELECT lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version
+            FROM documents
+            WHERE item_key = ?
+            """,
+            (item_key,),
+        ).fetchone()
+        if row is None:
+            return None, None, None, None, None
+
+        lexical_hash = str(row["lexical_hash"]) if row["lexical_hash"] else None
+        vector_hash = str(row["vector_hash"]) if row["vector_hash"] else None
+        content_hash = str(row["content_hash"]) if row["content_hash"] else None
+        lexical_profile_version = int(row["lexical_profile_version"]) if row["lexical_profile_version"] is not None else None
+        vector_profile_version = int(row["vector_profile_version"]) if row["vector_profile_version"] is not None else None
+        return lexical_hash, vector_hash, content_hash, lexical_profile_version, vector_profile_version
+
     def set_item_hashes(
         self,
         item_key: str,
@@ -703,6 +735,8 @@ class LexicalIndex:
         lexical_hash: str | None = None,
         vector_hash: str | None = None,
         content_hash: str | None = None,
+        lexical_profile_version: int | None = None,
+        vector_profile_version: int | None = None,
     ) -> bool:
         updates: list[str] = []
         params: list[object] = []
@@ -715,6 +749,12 @@ class LexicalIndex:
         if content_hash is not None:
             updates.append("content_hash = ?")
             params.append(content_hash)
+        if lexical_profile_version is not None:
+            updates.append("lexical_profile_version = ?")
+            params.append(int(lexical_profile_version))
+        if vector_profile_version is not None:
+            updates.append("vector_profile_version = ?")
+            params.append(int(vector_profile_version))
         if not updates:
             return False
 

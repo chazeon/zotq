@@ -164,6 +164,8 @@ class IndexConfig(BaseModel):
 
     enabled: bool = True
     index_dir: str = "~/.local/share/zotq/index"
+    lexical_profile_version: int = Field(default=1, ge=1)
+    vector_profile_version: int = Field(default=1, ge=1)
     embedding_provider: str = "local"
     embedding_model: str = ""
     embedding_base_url: str = ""

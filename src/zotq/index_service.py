@@ -195,10 +195,28 @@ class MockIndexService:
             content_hash = self._item_content_hash(item)
             lexical_hash = content_hash
             vector_hash = self._item_vector_hash(item)
+            current_lexical_profile_version = self._config.lexical_profile_version
+            current_vector_profile_version = self._config.vector_profile_version
 
-            existing_lexical_hash_raw, existing_vector_hash_raw, existing_content_hash = self._lexical.get_item_hashes(item.key)
+            (
+                existing_lexical_hash_raw,
+                existing_vector_hash_raw,
+                existing_content_hash,
+                existing_lexical_profile_version_raw,
+                existing_vector_profile_version_raw,
+            ) = self._lexical.get_item_sync_state(item.key)
             existing_lexical_hash = existing_lexical_hash_raw
             existing_vector_hash = existing_vector_hash_raw
+            existing_lexical_profile_version = (
+                current_lexical_profile_version
+                if existing_lexical_profile_version_raw is None
+                else existing_lexical_profile_version_raw
+            )
+            existing_vector_profile_version = (
+                current_vector_profile_version
+                if existing_vector_profile_version_raw is None
+                else existing_vector_profile_version_raw
+            )
             if existing_lexical_hash is None and existing_content_hash:
                 existing_lexical_hash = existing_content_hash
             if existing_vector_hash is None:
@@ -206,8 +224,14 @@ class MockIndexService:
                 if existing_item is not None and self._vector.has_item(item.key):
                     existing_vector_hash = self._item_vector_hash(existing_item)
 
-            lexical_changed = existing_lexical_hash != lexical_hash
-            vector_changed = existing_vector_hash != vector_hash
+            lexical_changed = (
+                existing_lexical_hash != lexical_hash
+                or existing_lexical_profile_version != current_lexical_profile_version
+            )
+            vector_changed = (
+                existing_vector_hash != vector_hash
+                or existing_vector_profile_version != current_vector_profile_version
+            )
 
             if skip_unchanged and not lexical_changed and not vector_changed:
                 # Persist migrated hash columns lazily so future syncs avoid fallback checks.
@@ -215,12 +239,16 @@ class MockIndexService:
                     existing_content_hash != content_hash
                     or existing_lexical_hash_raw != lexical_hash
                     or existing_vector_hash_raw != vector_hash
+                    or existing_lexical_profile_version_raw != current_lexical_profile_version
+                    or existing_vector_profile_version_raw != current_vector_profile_version
                 ):
                     self._lexical.set_item_hashes(
                         item.key,
                         lexical_hash=lexical_hash,
                         vector_hash=vector_hash,
                         content_hash=content_hash,
+                        lexical_profile_version=current_lexical_profile_version,
+                        vector_profile_version=current_vector_profile_version,
                     )
                 if checkpoint_mode:
                     next_remaining = remaining_keys[index:]
@@ -245,6 +273,10 @@ class MockIndexService:
                     content_hash=content_hash,
                     lexical_hash=lexical_hash,
                     vector_hash=stored_vector_hash,
+                    lexical_profile_version=current_lexical_profile_version,
+                    vector_profile_version=(
+                        current_vector_profile_version if not vector_changed else existing_vector_profile_version_raw
+                    ),
                 )
             else:
                 self._lexical.set_item_hashes(
@@ -252,6 +284,8 @@ class MockIndexService:
                     lexical_hash=lexical_hash,
                     content_hash=content_hash,
                     vector_hash=vector_hash if not vector_changed else None,
+                    lexical_profile_version=current_lexical_profile_version,
+                    vector_profile_version=current_vector_profile_version if not vector_changed else None,
                 )
 
             if vector_changed:
@@ -269,7 +303,11 @@ class MockIndexService:
                         )
                     )
                 self._vector.upsert_item(item.key, vector_records)
-                self._lexical.set_item_hashes(item.key, vector_hash=vector_hash)
+                self._lexical.set_item_hashes(
+                    item.key,
+                    vector_hash=vector_hash,
+                    vector_profile_version=current_vector_profile_version,
+                )
 
             if checkpoint_mode:
                 next_remaining = remaining_keys[index:]
@@ -340,6 +378,29 @@ class MockIndexService:
 
     def list_items_missing_citation_key(self) -> list[str]:
         return self._lexical.list_item_keys_missing_citation_key()
+
+    def get_collect_checkpoint(self) -> dict[str, object] | None:
+        return self._checkpoints.collect_state()
+
+    def write_collect_checkpoint(
+        self,
+        *,
+        scope: str,
+        full: bool,
+        expected_total: int | None,
+        next_offset: int,
+        collected_keys: list[str],
+    ) -> None:
+        self._checkpoints.write_collect(
+            scope=scope,
+            full=full,
+            expected_total=expected_total,
+            next_offset=next_offset,
+            collected_keys=collected_keys,
+        )
+
+    def clear_collect_checkpoint(self) -> None:
+        self._checkpoints.clear_collect()
 
     def list_items_missing_field(self, field: str) -> list[str]:
         return self._lexical.list_item_keys_missing_field(field)

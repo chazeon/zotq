@@ -25,6 +25,8 @@ allow_fallback = false
 [profiles.default.index]
 enabled = true
 index_dir = "~/.cache/zotq/index-file"
+lexical_profile_version = 1
+vector_profile_version = 1
 embedding_provider = "local"
 embedding_model = "local-hash-v1"
 embedding_base_url = ""
@@ -57,6 +59,8 @@ def test_env_overrides_file(tmp_path: Path) -> None:
         "ZOTQ_ALLOW_FALLBACK": "true",
         "ZOTQ_EMBEDDING_PROVIDER": "ollama",
         "ZOTQ_EMBEDDING_MODEL": "nomic-embed-text",
+        "ZOTQ_LEXICAL_PROFILE_VERSION": "3",
+        "ZOTQ_VECTOR_PROFILE_VERSION": "4",
         "ZOTQ_EMBEDDING_BASE_URL": "http://127.0.0.1:11434",
         "ZOTQ_EMBEDDING_TIMEOUT_SECONDS": "55",
         "ZOTQ_EMBEDDING_MAX_RETRIES": "4",
@@ -71,6 +75,8 @@ def test_env_overrides_file(tmp_path: Path) -> None:
     assert profile.search.allow_fallback is True
     assert profile.index.embedding_provider == "ollama"
     assert profile.index.embedding_model == "nomic-embed-text"
+    assert profile.index.lexical_profile_version == 3
+    assert profile.index.vector_profile_version == 4
     assert profile.index.embedding_base_url == "http://127.0.0.1:11434"
     assert profile.index.embedding_timeout_seconds == 55
     assert profile.index.embedding_max_retries == 4

@@ -541,30 +541,106 @@ class ZotQueryClient:
     def index_inspect(self, *, sample_limit: int = 5) -> dict[str, object]:
         return self._index.inspect_index(sample_limit=sample_limit)
 
-    def _collect_all_items(self, *, page_size: int = 100, progress: ProgressCallback | None = None) -> list[Item]:
+    @staticmethod
+    def _as_int(value: object, *, default: int = 0) -> int:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                return default
+        return default
+
+    def _collect_all_items(
+        self,
+        *,
+        page_size: int = 100,
+        progress: ProgressCallback | None = None,
+        checkpoint_scope: str = "sync",
+        full: bool = False,
+    ) -> list[Item]:
         items: list[Item] = []
+        seen_keys: set[str] = set()
+        collected_keys: list[str] = []
         expected_total = self._source.count_items()
         offset = 0
+
+        get_collect = getattr(self._index, "get_collect_checkpoint", None)
+        write_collect = getattr(self._index, "write_collect_checkpoint", None)
+        clear_collect = getattr(self._index, "clear_collect_checkpoint", None)
+
+        if callable(get_collect):
+            state = get_collect()
+            if isinstance(state, dict):
+                scope = str(state.get("scope") or "").strip().lower()
+                resume_full = bool(state.get("full", False))
+                if scope == checkpoint_scope and resume_full == full:
+                    offset = max(0, self._as_int(state.get("next_offset"), default=0))
+                    expected_raw = state.get("expected_total")
+                    if expected_raw is not None:
+                        expected_total = max(0, self._as_int(expected_raw, default=0))
+                    raw_keys = state.get("collected_keys")
+                    if isinstance(raw_keys, list):
+                        for raw_key in raw_keys:
+                            key = str(raw_key).strip()
+                            if not key or key in seen_keys:
+                                continue
+                            item = self._source.get_item(key)
+                            if item is None:
+                                continue
+                            seen_keys.add(key)
+                            collected_keys.append(key)
+                            items.append(item)
+                    if progress is not None:
+                        progress("collect", len(items), expected_total)
+                elif callable(clear_collect):
+                    clear_collect()
+
         while True:
             page = self._source.list_items(limit=page_size, offset=offset)
             if not page:
                 break
-            items.extend(page)
+            for item in page:
+                key = item.key.strip()
+                if not key or key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                collected_keys.append(key)
+                items.append(item)
+            offset += len(page)
+            if callable(write_collect):
+                write_collect(
+                    scope=checkpoint_scope,
+                    full=full,
+                    expected_total=expected_total,
+                    next_offset=offset,
+                    collected_keys=collected_keys,
+                )
             if progress is not None:
                 progress("collect", len(items), expected_total)
             if len(page) < page_size:
                 break
-            offset += len(page)
         return items
 
     def index_sync(self, *, full: bool = False, progress: ProgressCallback | None = None):
-        items = self._collect_all_items(progress=progress)
+        items = self._collect_all_items(progress=progress, checkpoint_scope="sync", full=full)
         status = self._index.sync(items=items, full=full, progress=progress)
         self.index_enrich_citation_keys(progress=progress)
+        clear_collect = getattr(self._index, "clear_collect_checkpoint", None)
+        if callable(clear_collect):
+            clear_collect()
         return status
 
     def index_rebuild(self, *, progress: ProgressCallback | None = None):
-        items = self._collect_all_items(progress=progress)
+        items = self._collect_all_items(progress=progress, checkpoint_scope="rebuild", full=True)
         status = self._index.rebuild(items=items, progress=progress)
         self.index_enrich_citation_keys(progress=progress)
+        clear_collect = getattr(self._index, "clear_collect_checkpoint", None)
+        if callable(clear_collect):
+            clear_collect()
         return status

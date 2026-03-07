@@ -44,6 +44,13 @@ class CheckpointStore:
             return ingest
         return None
 
+    def collect_state(self) -> dict[str, object] | None:
+        payload = self.read()
+        collect = payload.get("collect")
+        if isinstance(collect, dict):
+            return collect
+        return None
+
     def write_ingest(
         self,
         *,
@@ -66,4 +73,32 @@ class CheckpointStore:
         payload = self.read()
         if "ingest" in payload:
             payload.pop("ingest", None)
+            self._write_payload(payload)
+
+    def write_collect(
+        self,
+        *,
+        scope: str,
+        full: bool,
+        expected_total: int | None,
+        next_offset: int,
+        collected_keys: list[str],
+    ) -> None:
+        payload = self.read()
+        collect_payload: dict[str, object] = {
+            "scope": scope,
+            "full": bool(full),
+            "next_offset": max(0, int(next_offset)),
+            "collected_keys": [str(key) for key in collected_keys if key],
+            "updated_at": datetime.now().astimezone().isoformat(),
+        }
+        if expected_total is not None:
+            collect_payload["expected_total"] = max(0, int(expected_total))
+        payload["collect"] = collect_payload
+        self._write_payload(payload)
+
+    def clear_collect(self) -> None:
+        payload = self.read()
+        if "collect" in payload:
+            payload.pop("collect", None)
             self._write_payload(payload)

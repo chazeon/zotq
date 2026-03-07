@@ -7,7 +7,7 @@ import pytest
 from zotq.client import ZotQueryClient
 from zotq.errors import ModeNotSupportedError
 from zotq.index_service import MockIndexService
-from zotq.models import AppConfig, QuerySpec, SearchMode
+from zotq.models import AppConfig, Item, QuerySpec, SearchMode
 from zotq.sources.mock import MockSourceAdapter
 
 
@@ -122,3 +122,58 @@ def test_index_lifecycle_updates_status() -> None:
     assert synced.document_count == 4
     assert rebuilt.ready is True
     assert rebuilt.chunk_count == 4
+
+
+def test_index_sync_collect_resumes_after_collection_interruption() -> None:
+    class _FlakyCollectSource(MockSourceAdapter):
+        def __init__(self) -> None:
+            super().__init__(semantic_enabled=True)
+            self._items = [Item(key=f"K{i:03d}", item_type="journalArticle", title=f"Title {i}") for i in range(120)]
+            self.offset_calls: list[int] = []
+            self._failed_once = False
+
+        def list_items(self, *, limit: int = 100, offset: int = 0) -> list[Item]:
+            self.offset_calls.append(offset)
+            if not self._failed_once and offset >= 100:
+                self._failed_once = True
+                raise RuntimeError("collect interrupted")
+            return list(self._items[offset : offset + limit])
+
+        def count_items(self) -> int | None:
+            return len(self._items)
+
+        def get_item(self, key: str) -> Item | None:
+            for item in self._items:
+                if item.key == key:
+                    return item
+            return None
+
+    config = AppConfig()
+    profile = config.profiles["default"]
+    profile.index.index_dir = tempfile.mkdtemp(prefix="zotq-test-collect-resume-index-")
+    source = _FlakyCollectSource()
+    index = MockIndexService(profile.index)
+    client = ZotQueryClient(
+        config=config,
+        profile_name="default",
+        source_adapter=source,
+        index_service=index,
+    )
+
+    with pytest.raises(RuntimeError, match="collect interrupted"):
+        client.index_sync(full=False)
+
+    first_run_calls = list(source.offset_calls)
+    assert first_run_calls == [0, 100]
+
+    status = client.index_sync(full=False)
+    assert status.ready is True
+    assert status.document_count == 120
+
+    second_run_calls = source.offset_calls[len(first_run_calls) :]
+    assert second_run_calls
+    assert second_run_calls[0] == 100
+    assert 0 not in second_run_calls
+
+    payload = index._checkpoints.read()  # type: ignore[attr-defined]
+    assert "collect" not in payload

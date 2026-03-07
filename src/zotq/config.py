@@ -45,6 +45,8 @@ def env_overrides(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     index_dir = data.get("ZOTQ_INDEX_DIR")
     embedding_provider = data.get("ZOTQ_EMBEDDING_PROVIDER")
     embedding_model = data.get("ZOTQ_EMBEDDING_MODEL")
+    lexical_profile_version = data.get("ZOTQ_LEXICAL_PROFILE_VERSION")
+    vector_profile_version = data.get("ZOTQ_VECTOR_PROFILE_VERSION")
     embedding_base_url = data.get("ZOTQ_EMBEDDING_BASE_URL")
     embedding_api_key = data.get("ZOTQ_EMBEDDING_API_KEY")
     embedding_timeout = data.get("ZOTQ_EMBEDDING_TIMEOUT_SECONDS")
@@ -72,6 +74,10 @@ def env_overrides(env: Mapping[str, str] | None = None) -> dict[str, Any]:
         index_patch["embedding_provider"] = embedding_provider
     if embedding_model:
         index_patch["embedding_model"] = embedding_model
+    if lexical_profile_version:
+        index_patch["lexical_profile_version"] = lexical_profile_version
+    if vector_profile_version:
+        index_patch["vector_profile_version"] = vector_profile_version
     if embedding_base_url:
         index_patch["embedding_base_url"] = embedding_base_url
     if embedding_api_key:
