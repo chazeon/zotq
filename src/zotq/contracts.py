@@ -107,7 +107,7 @@ def build_cli_api_contract() -> CliApiContract:
         global_options=[
             "-c, --config PATH",
             "--profile NAME",
-            "--mode [local-api|remote]",
+            "--mode [local-api|remote|snapshot]",
             "--output [table|json|jsonl|bib|bibtex]",
             "--verbose",
         ],

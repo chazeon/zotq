@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class Mode(str, Enum):
     LOCAL_API = "local-api"
     REMOTE = "remote"
+    SNAPSHOT = "snapshot"
 
 
 class OutputFormat(str, Enum):
@@ -254,6 +255,12 @@ class RemoteConfig(BaseModel):
     library_id: str = "0"
 
 
+class SnapshotConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    bib_path: str = ""
+
+
 class ProfileConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -263,6 +270,7 @@ class ProfileConfig(BaseModel):
     index: IndexConfig = Field(default_factory=IndexConfig)
     local_api: LocalApiConfig = Field(default_factory=LocalApiConfig)
     remote: RemoteConfig = Field(default_factory=RemoteConfig)
+    snapshot: SnapshotConfig = Field(default_factory=SnapshotConfig)
 
 
 class AppConfig(BaseModel):

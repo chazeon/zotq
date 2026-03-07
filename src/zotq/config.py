@@ -41,6 +41,7 @@ def env_overrides(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     local_base = data.get("ZOTQ_LOCAL_API_BASE_URL")
     remote_base = data.get("ZOTQ_REMOTE_BASE_URL")
     remote_token = data.get("ZOTQ_REMOTE_BEARER_TOKEN")
+    snapshot_bib_path = data.get("ZOTQ_SNAPSHOT_BIB_PATH")
 
     index_dir = data.get("ZOTQ_INDEX_DIR")
     embedding_provider = data.get("ZOTQ_EMBEDDING_PROVIDER")
@@ -105,6 +106,12 @@ def env_overrides(env: Mapping[str, str] | None = None) -> dict[str, Any]:
         remote_patch["bearer_token"] = remote_token
     if remote_patch:
         profile_patch["remote"] = remote_patch
+
+    snapshot_patch: dict[str, Any] = {}
+    if snapshot_bib_path:
+        snapshot_patch["bib_path"] = snapshot_bib_path
+    if snapshot_patch:
+        profile_patch["snapshot"] = snapshot_patch
 
     if profile_patch:
         out = {

@@ -23,6 +23,7 @@ Core runtime now includes:
 ## Backends
 - `local-api`: talks to the Zotero Desktop local API.
 - `remote`: talks to a self-hosted or cloud API service.
+- `snapshot`: reads from a local BibTeX snapshot file for offline source queries.
 
 ## Configuration (TOML)
 `zotq` uses a TOML config file.
@@ -80,6 +81,9 @@ base_url = "https://zotero.example.com/api"
 bearer_token = ""
 timeout_seconds = 15
 verify_tls = true
+
+[profiles.default.snapshot]
+bib_path = "~/exports/zotero-library.bib"
 ```
 
 Environment variable overrides are supported with the same precedence rule:
@@ -102,6 +106,7 @@ Useful vars:
 - `ZOTQ_LOCAL_API_BASE_URL`
 - `ZOTQ_REMOTE_BASE_URL`
 - `ZOTQ_REMOTE_BEARER_TOKEN`
+- `ZOTQ_SNAPSHOT_BIB_PATH`
 
 ## Enable Zotero Local API
 To allow `zotq` to use Zotero's local API:
@@ -265,6 +270,12 @@ Search backend selection:
 uv run zotq --mode local-api --output json search run "mantle hydration" --backend auto
 uv run zotq --mode local-api --output json search run "mantle hydration" --backend source
 uv run zotq --mode local-api --output json search run "mantle hydration" --backend index
+```
+
+Snapshot mode example:
+
+```bash
+uv run zotq --mode snapshot search run "mantle hydration" --search-mode keyword --limit 5
 ```
 
 Notes:

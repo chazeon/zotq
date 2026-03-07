@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .index_service import MockIndexService
 from .models import Mode, ProfileConfig
-from .sources import LocalApiSourceAdapter, RemoteApiSourceAdapter, SourceAdapter
+from .sources import BibtexSnapshotSourceAdapter, LocalApiSourceAdapter, RemoteApiSourceAdapter, SourceAdapter
 
 
 def build_source_adapter(profile: ProfileConfig) -> SourceAdapter:
@@ -12,6 +12,8 @@ def build_source_adapter(profile: ProfileConfig) -> SourceAdapter:
         return LocalApiSourceAdapter(profile)
     if profile.mode == Mode.REMOTE:
         return RemoteApiSourceAdapter(profile)
+    if profile.mode == Mode.SNAPSHOT:
+        return BibtexSnapshotSourceAdapter(profile)
     raise ValueError(f"Unsupported mode: {profile.mode}")
 
 

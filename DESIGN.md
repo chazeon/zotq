@@ -94,11 +94,11 @@ Click CLI
   - Uses Zotero local HTTP API.
 - `RemoteApiSourceAdapter`
   - Uses remote/self-hosted HTTP API.
-- Optional `SnapshotSourceAdapter` (future)
-  - Reads from exported snapshots or safe copies.
-  - First practical target is collaborator-provided `.bib`/BibTeX ingestion for offline access.
-  - JSON snapshot support remains preferred for full-fidelity metadata where available.
+- `BibtexSnapshotSourceAdapter`
+  - Reads from a configured local `.bib` snapshot for offline source querying.
+  - Exposes explicit degraded source capabilities (`semantic`/`hybrid` disabled on source route).
   - Must not touch live `zotero.sqlite`.
+  - JSON snapshot support remains preferred for full-fidelity metadata when available.
 
 ### 4.3 Object Lifecycle Per CLI Invocation
 1. Parse CLI options.
@@ -299,7 +299,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 ### 6.1 Global Options
 - `-c, --config PATH`
 - `--profile NAME`
-- `--mode [local-api|remote]`
+- `--mode [local-api|remote|snapshot]`
 - `--output [table|json|jsonl|bib|bibtex]`
 - `--verbose`
 - `--non-interactive` (no prompts or interactive fallbacks).

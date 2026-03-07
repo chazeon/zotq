@@ -44,7 +44,7 @@ def test_global_options_are_explicit() -> None:
     contract = build_cli_api_contract()
 
     assert "-c, --config PATH" in contract.global_options
-    assert "--mode [local-api|remote]" in contract.global_options
+    assert "--mode [local-api|remote|snapshot]" in contract.global_options
     assert "--output [table|json|jsonl|bib|bibtex]" in contract.global_options
 
 

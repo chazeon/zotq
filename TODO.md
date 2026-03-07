@@ -90,7 +90,7 @@ Status values: `todo`, `in_progress`, `done`.
 
 ## P5 Snapshot Mode and Full-text Traceability
 
-- [ ] `T5.1` (`todo`) Add `snapshot` mode and `BibtexSnapshotSourceAdapter`.
+- [x] `T5.1` (`done`) Add `snapshot` mode and `BibtexSnapshotSourceAdapter`.
   - Files: `src/zotq/models.py`, `src/zotq/config.py`, `src/zotq/factory.py`, `src/zotq/sources/snapshot_bibtex.py`.
   - Tests: `tests/test_snapshot_mode_config.py`, `tests/test_snapshot_bibtex_adapter.py`, `tests/test_snapshot_mode_contract.py`.
 
