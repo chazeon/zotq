@@ -407,6 +407,17 @@ def index_status(runtime: RuntimeContext) -> None:
     click.echo(render_payload(payload, runtime.output))
 
 
+@index_group.command("inspect")
+@click.option("sample_limit", "--sample-limit", type=int, default=5, show_default=True)
+@pass_runtime
+def index_inspect(runtime: RuntimeContext, sample_limit: int) -> None:
+    try:
+        payload = runtime.client.index_inspect(sample_limit=sample_limit)
+    except BackendConnectionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(render_payload(payload, runtime.output))
+
+
 @index_group.command("sync")
 @click.option("full", "--full", is_flag=True, default=False)
 @click.option("show_progress", "--progress/--no-progress", default=True, help="Show progress in table output.")

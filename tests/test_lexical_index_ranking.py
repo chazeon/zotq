@@ -226,3 +226,34 @@ def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Pat
         assert [hit.item.key for hit in hits] == ["LEGACY"]
     finally:
         index.close()
+
+
+def test_inspect_structured_fields_reports_missing_counts_and_samples(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        has_fields = Item(
+            key="HAS",
+            item_type="journalArticle",
+            title="Has fields",
+            doi="10.1000/xyz",
+            citation_key="hasKey",
+            journal="Journal A",
+        )
+        missing_fields = Item(
+            key="MISS",
+            item_type="journalArticle",
+            title="Missing fields",
+        )
+        _upsert(index, has_fields, "has fields text")
+        _upsert(index, missing_fields, "missing fields text")
+
+        summary = index.inspect_structured_fields(sample_limit=1)
+
+        assert summary["documents"] == 2
+        fields = summary["fields"]
+        assert fields["doi"]["missing"] == 1
+        assert fields["citation_key"]["missing"] == 1
+        assert fields["journal"]["missing"] == 1
+        assert len(fields["doi"]["sample_missing_item_keys"]) == 1
+    finally:
+        index.close()

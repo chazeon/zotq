@@ -142,6 +142,15 @@ class MockIndexService:
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
         return self._lexical.set_item_citation_key(item_key, citation_key)
 
+    def inspect_index(self, *, sample_limit: int = 5) -> dict[str, object]:
+        lexical = self._lexical.inspect_structured_fields(sample_limit=sample_limit)
+        return {
+            "documents": lexical.get("documents", 0),
+            "chunks": self._lexical.chunk_count(),
+            "vectors": self._vector.chunk_count(),
+            "fields": lexical.get("fields", {}),
+        }
+
     def search(self, query: QuerySpec):
         status = self.status()
         if not status.enabled:

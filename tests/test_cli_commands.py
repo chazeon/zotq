@@ -550,3 +550,20 @@ def test_index_enrich_returns_counts_when_index_empty() -> None:
     assert payload["citation_keys"]["missing"] == 0
     assert payload["citation_keys"]["updated"] == 0
     assert payload["citation_keys"]["remaining"] == 0
+
+
+def test_index_inspect_returns_field_coverage_summary() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "index", "inspect", "--sample-limit", "2"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "documents" in payload
+    assert "chunks" in payload
+    assert "vectors" in payload
+    assert "fields" in payload
+    fields = payload["fields"]
+    assert "doi" in fields
+    assert "citation_key" in fields
+    assert "journal" in fields
+    assert isinstance(fields["doi"]["sample_missing_item_keys"], list)

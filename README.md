@@ -154,6 +154,7 @@ uv run zotq --mode local-api index sync
 uv run zotq --mode local-api index sync --full
 uv run zotq --mode local-api index rebuild
 uv run zotq --mode local-api index enrich
+uv run zotq --mode local-api index inspect --sample-limit 5
 ```
 
 In `--output table` mode, `index sync`/`index rebuild` now show rich progress with elapsed/remaining estimates when totals are available.
@@ -162,6 +163,7 @@ Use `--no-progress` to disable it.
 `index sync` (without `--full`) is incremental and skips unchanged items to avoid unnecessary re-embedding.
 `index sync --full` clears and rebuilds lexical/vector indexes from scratch.
 `index enrich` updates citation-key metadata in place (BBT RPC/BibTeX fallback) without rebuilding vectors.
+`index inspect` reports structured-field coverage (missing/present DOI, citation key, journal) with sample item keys.
 
 Run semantic search:
 

@@ -302,6 +302,9 @@ class ZotQueryClient:
     def index_status(self):
         return self._index.status()
 
+    def index_inspect(self, *, sample_limit: int = 5) -> dict[str, object]:
+        return self._index.inspect_index(sample_limit=sample_limit)
+
     def _collect_all_items(self, *, page_size: int = 100, progress: ProgressCallback | None = None) -> list[Item]:
         items: list[Item] = []
         expected_total = self._source.count_items()

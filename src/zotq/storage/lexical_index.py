@@ -223,6 +223,60 @@ class LexicalIndex:
         ).fetchall()
         return [str(row["item_key"]) for row in rows]
 
+    @staticmethod
+    def _norm_column_for_field(field: str) -> str:
+        mapping = {
+            "doi": "doi_norm",
+            "citation_key": "citation_key_norm",
+            "journal": "journal_norm",
+        }
+        column = mapping.get(field)
+        if column is None:
+            raise ValueError(f"Unsupported field for structured inspection: {field}")
+        return column
+
+    def list_item_keys_missing_field(self, field: str, *, limit: int = 5) -> list[str]:
+        column = self._norm_column_for_field(field)
+        rows = self._conn.execute(
+            f"""
+            SELECT item_key
+            FROM documents
+            WHERE {column} IS NULL OR {column} = ''
+            ORDER BY item_key
+            LIMIT ?
+            """,
+            (max(0, limit),),
+        ).fetchall()
+        return [str(row["item_key"]) for row in rows]
+
+    def count_missing_field(self, field: str) -> int:
+        column = self._norm_column_for_field(field)
+        row = self._conn.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM documents
+            WHERE {column} IS NULL OR {column} = ''
+            """
+        ).fetchone()
+        return int(row["c"]) if row else 0
+
+    def inspect_structured_fields(self, *, sample_limit: int = 5) -> dict[str, object]:
+        doc_count = self.document_count()
+        fields = ["doi", "citation_key", "journal"]
+        details: dict[str, object] = {}
+        for field in fields:
+            missing = self.count_missing_field(field)
+            present = max(0, doc_count - missing)
+            details[field] = {
+                "missing": missing,
+                "present": present,
+                "sample_missing_item_keys": self.list_item_keys_missing_field(field, limit=sample_limit),
+            }
+        return {
+            "documents": doc_count,
+            "fields": details,
+        }
+
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
         clean = citation_key.strip()
         if not clean:

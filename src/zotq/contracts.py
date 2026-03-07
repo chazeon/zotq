@@ -45,6 +45,7 @@ V1_COMMANDS: list[CommandSpec] = [
     CommandSpec(resource="collection", verb="list", usage="zotq collection list", summary="List collections"),
     CommandSpec(resource="tag", verb="list", usage="zotq tag list", summary="List tags"),
     CommandSpec(resource="index", verb="status", usage="zotq index status", summary="Show index status"),
+    CommandSpec(resource="index", verb="inspect", usage="zotq index inspect", summary="Inspect index field coverage"),
     CommandSpec(resource="index", verb="sync", usage="zotq index sync [--full]", summary="Sync index incrementally or full"),
     CommandSpec(resource="index", verb="rebuild", usage="zotq index rebuild", summary="Rebuild index from source"),
     CommandSpec(resource="index", verb="enrich", usage="zotq index enrich", summary="Enrich index metadata in place"),

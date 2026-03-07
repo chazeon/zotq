@@ -30,6 +30,7 @@ Before implementing behavior-heavy features:
 - `zotq collection list`
 - `zotq tag list`
 - `zotq index status`
+- `zotq index inspect`
 - `zotq index sync [--full]`
 - `zotq index rebuild`
 - `zotq index enrich`

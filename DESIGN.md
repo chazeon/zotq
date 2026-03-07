@@ -37,6 +37,7 @@ Tech constraints:
   - `collection list`
   - `tag list`
 - `index status`
+- `index inspect`
 - `index sync`
 - `index rebuild`
 - `index enrich`
@@ -281,6 +282,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq collection list`
 - `zotq tag list`
 - `zotq index status`
+- `zotq index inspect`
 - `zotq index sync [--full]`
 - `zotq index rebuild`
 
@@ -314,6 +316,8 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 ### 6.5 Index Command Semantics
 - `index status`
   - Reports index readiness, counts, last sync timestamp, embedding model.
+- `index inspect`
+  - Reports structured field coverage/missingness and sample item keys for gaps.
 - `index sync`
   - Incremental update from source checkpoints (lexical + vector).
 - `index sync --full`
@@ -597,6 +601,6 @@ src/zotq/
 - Built-in `local` embedding provider works without extra runtime dependencies.
 - External providers (`openai`/`ollama`/`gemini`) are configurable via `IndexConfig`.
 - Unsupported modes fail clearly or fallback only when explicitly enabled.
-- `index status/sync/rebuild` provide actionable output.
+- `index status/inspect/sync/rebuild/enrich` provide actionable output.
 - JSON output schema is stable across modes.
 - No live Zotero DB reads are required.
