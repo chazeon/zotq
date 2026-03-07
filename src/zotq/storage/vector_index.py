@@ -119,6 +119,13 @@ class VectorIndex:
         row = self._conn.execute("SELECT COUNT(*) AS c FROM vectors").fetchone()
         return int(row["c"]) if row else 0
 
+    def has_item(self, item_key: str) -> bool:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS c FROM vectors WHERE item_key = ?",
+            (item_key,),
+        ).fetchone()
+        return bool(row and int(row["c"]) > 0)
+
     @staticmethod
     def _dot(a: list[float], b: list[float]) -> float:
         return sum(x * y for x, y in zip(a, b))

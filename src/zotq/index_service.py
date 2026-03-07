@@ -71,38 +71,216 @@ class MockIndexService:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _creator_blob(item: Item) -> str:
+        return ", ".join(
+            " ".join(part for part in [creator.first_name, creator.last_name] if part).strip()
+            for creator in item.creators
+        )
+
+    @classmethod
+    def _item_vector_text(cls, item: Item) -> str:
+        tags = ", ".join(item.tags)
+        parts = [
+            item.title or "",
+            item.abstract or "",
+            cls._creator_blob(item),
+            tags,
+        ]
+        return "\n".join(part for part in parts if part).strip()
+
+    def _item_vector_hash(self, item: Item) -> str:
+        payload = {
+            "provider": self._config.embedding_provider,
+            "model": self._config.embedding_model,
+            "text": self._item_vector_text(item),
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_item_sequence(items: list[Item]) -> list[Item]:
+        ordered: list[Item] = []
+        seen: set[str] = set()
+        for item in items:
+            key = (item.key or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            ordered.append(item)
+        return ordered
+
+    @staticmethod
+    def _int_from_payload(value: object, *, default: int = 0) -> int:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                return default
+        return default
+
+    @classmethod
+    def _resume_plan(
+        cls,
+        *,
+        items: list[Item],
+        mode: str,
+        ingest_state: dict[str, object] | None,
+    ) -> tuple[list[Item], int, int, bool]:
+        normalized_items = cls._normalize_item_sequence(items)
+        if not normalized_items:
+            return [], 0, 0, False
+
+        if not ingest_state:
+            return normalized_items, len(normalized_items), 0, False
+
+        saved_mode = str(ingest_state.get("mode") or "").strip().lower()
+        if saved_mode != mode:
+            return normalized_items, len(normalized_items), 0, False
+
+        remaining_raw = ingest_state.get("remaining_keys")
+        if not isinstance(remaining_raw, list):
+            return normalized_items, len(normalized_items), 0, False
+        remaining_keys = [str(value).strip() for value in remaining_raw if str(value).strip()]
+        if not remaining_keys:
+            return normalized_items, len(normalized_items), 0, False
+
+        total_saved = cls._int_from_payload(ingest_state.get("total"), default=len(normalized_items))
+        done_saved = cls._int_from_payload(ingest_state.get("done"), default=max(0, total_saved - len(remaining_keys)))
+        done_offset = max(0, min(done_saved, total_saved))
+
+        by_key = {item.key: item for item in normalized_items}
+        input_order_keys = [item.key for item in normalized_items]
+        done_prefix_keys = set(input_order_keys[: max(0, min(done_offset, len(input_order_keys)))])
+        planned: list[Item] = []
+        planned_keys: set[str] = set()
+        for key in remaining_keys:
+            item = by_key.get(key)
+            if item is None:
+                continue
+            planned.append(item)
+            planned_keys.add(key)
+
+        for item in normalized_items:
+            if item.key in planned_keys:
+                continue
+            if item.key in done_prefix_keys:
+                continue
+            planned.append(item)
+            planned_keys.add(item.key)
+
+        total = max(total_saved, done_offset + len(planned))
+        return planned, total, done_offset, True
+
     def _ingest_items(
         self,
         items: list[Item],
         *,
         progress: ProgressCallback | None = None,
         skip_unchanged: bool = False,
+        checkpoint_mode: str | None = None,
+        done_offset: int = 0,
+        total_override: int | None = None,
     ) -> None:
-        total = len(items)
+        total = total_override if total_override is not None else len(items)
+        remaining_keys = [item.key for item in items]
         for index, item in enumerate(items, start=1):
+            current_done = done_offset + index
             content_hash = self._item_content_hash(item)
-            if skip_unchanged and self._lexical.get_content_hash(item.key) == content_hash:
+            lexical_hash = content_hash
+            vector_hash = self._item_vector_hash(item)
+
+            existing_lexical_hash_raw, existing_vector_hash_raw, existing_content_hash = self._lexical.get_item_hashes(item.key)
+            existing_lexical_hash = existing_lexical_hash_raw
+            existing_vector_hash = existing_vector_hash_raw
+            if existing_lexical_hash is None and existing_content_hash:
+                existing_lexical_hash = existing_content_hash
+            if existing_vector_hash is None:
+                existing_item = self._lexical.get_item(item.key)
+                if existing_item is not None and self._vector.has_item(item.key):
+                    existing_vector_hash = self._item_vector_hash(existing_item)
+
+            lexical_changed = existing_lexical_hash != lexical_hash
+            vector_changed = existing_vector_hash != vector_hash
+
+            if skip_unchanged and not lexical_changed and not vector_changed:
+                # Persist migrated hash columns lazily so future syncs avoid fallback checks.
+                if (
+                    existing_content_hash != content_hash
+                    or existing_lexical_hash_raw != lexical_hash
+                    or existing_vector_hash_raw != vector_hash
+                ):
+                    self._lexical.set_item_hashes(
+                        item.key,
+                        lexical_hash=lexical_hash,
+                        vector_hash=vector_hash,
+                        content_hash=content_hash,
+                    )
+                if checkpoint_mode:
+                    next_remaining = remaining_keys[index:]
+                    self._checkpoints.write_ingest(
+                        mode=checkpoint_mode,
+                        total=total,
+                        done=current_done,
+                        remaining_keys=next_remaining,
+                    )
                 if progress is not None:
-                    progress("index", index, total)
+                    progress("index", current_done, total)
                 continue
 
-            full_text = extract_item_text(item)
-            chunks = chunk_text(item.key, full_text)
-            self._lexical.upsert_item(item=item, chunks=chunks, full_text=full_text, content_hash=content_hash)
-            embeddings = self._embedding.embed_texts([chunk.text for chunk in chunks])
-            vector_records: list[VectorRecord] = []
-            for chunk, embedding in zip(chunks, embeddings):
-                vector_records.append(
-                    VectorRecord(
-                        chunk_id=chunk.chunk_id,
-                        item_key=item.key,
-                        ordinal=chunk.ordinal,
-                        embedding=embedding,
-                    )
+            if lexical_changed:
+                stored_vector_hash = vector_hash if not vector_changed else existing_vector_hash_raw
+                full_text = extract_item_text(item)
+                chunks = chunk_text(item.key, full_text)
+                self._lexical.upsert_item(
+                    item=item,
+                    chunks=chunks,
+                    full_text=full_text,
+                    content_hash=content_hash,
+                    lexical_hash=lexical_hash,
+                    vector_hash=stored_vector_hash,
                 )
-            self._vector.upsert_item(item.key, vector_records)
+            else:
+                self._lexical.set_item_hashes(
+                    item.key,
+                    lexical_hash=lexical_hash,
+                    content_hash=content_hash,
+                    vector_hash=vector_hash if not vector_changed else None,
+                )
+
+            if vector_changed:
+                vector_text = self._item_vector_text(item)
+                vector_chunks = chunk_text(item.key, vector_text)
+                embeddings = self._embedding.embed_texts([chunk.text for chunk in vector_chunks]) if vector_chunks else []
+                vector_records: list[VectorRecord] = []
+                for chunk, embedding in zip(vector_chunks, embeddings):
+                    vector_records.append(
+                        VectorRecord(
+                            chunk_id=chunk.chunk_id,
+                            item_key=item.key,
+                            ordinal=chunk.ordinal,
+                            embedding=embedding,
+                        )
+                    )
+                self._vector.upsert_item(item.key, vector_records)
+                self._lexical.set_item_hashes(item.key, vector_hash=vector_hash)
+
+            if checkpoint_mode:
+                next_remaining = remaining_keys[index:]
+                self._checkpoints.write_ingest(
+                    mode=checkpoint_mode,
+                    total=total,
+                    done=current_done,
+                    remaining_keys=next_remaining,
+                )
             if progress is not None:
-                progress("index", index, total)
+                progress("index", current_done, total)
 
     def sync(
         self,
@@ -114,12 +292,36 @@ class MockIndexService:
         if not self._config.enabled:
             raise IndexNotReadyError("Index operations are disabled by configuration.")
 
-        if full:
+        normalized_items = self._normalize_item_sequence(items or [])
+        mode = "full" if full else "incremental"
+        ingest_state = self._checkpoints.ingest_state()
+        planned_items, total_items, done_offset, resume = self._resume_plan(
+            items=normalized_items,
+            mode=mode,
+            ingest_state=ingest_state,
+        )
+
+        if full and not resume:
             self._lexical.clear()
             self._vector.clear()
 
-        if items:
-            self._ingest_items(items, progress=progress, skip_unchanged=not full)
+        if planned_items:
+            self._checkpoints.write_ingest(
+                mode=mode,
+                total=total_items,
+                done=done_offset,
+                remaining_keys=[item.key for item in planned_items],
+            )
+            self._ingest_items(
+                planned_items,
+                progress=progress,
+                skip_unchanged=not full,
+                checkpoint_mode=mode,
+                done_offset=done_offset,
+                total_override=total_items,
+            )
+        else:
+            self._checkpoints.clear_ingest()
 
         self._checkpoints.write(last_sync_at=datetime.now().astimezone())
         return self.status()

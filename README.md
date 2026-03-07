@@ -139,7 +139,7 @@ uv run zotq item get ABCD1234
 `--output bibtex` renders BibTeX entries (`format=bibtex`).
 
 ## Search Modes
-- `keyword`: SQLite FTS5 lexical ranking.
+- `keyword`: SQLite FTS5 lexical ranking over a field-aware projection (`title`, `abstract`, `journal`, `creators`, `tags`, `body`).
 - `fuzzy`: typo-tolerant lexical matching.
 - `semantic`: local vector similarity search over indexed chunks.
 - `hybrid`: weighted lexical + vector fusion (`--alpha`) using per-query score normalization.
@@ -161,13 +161,17 @@ uv run zotq --mode local-api index inspect --sample-limit 5
 In `--output table` mode, `index sync`/`index rebuild` now show rich progress with elapsed/remaining estimates when totals are available.
 Use `--no-progress` to disable it.
 
-`index sync` (without `--full`) is incremental and skips unchanged items to avoid unnecessary re-embedding.
+`index sync` (without `--full`) is incremental with split hashes:
+- lexical hash controls document/FTS refresh.
+- vector hash controls chunk re-embedding.
+- metadata-only changes (for example DOI/journal/citation key) update lexical metadata without forcing vector re-embedding.
+Interrupted syncs now persist per-item ingest checkpoints and resume on the next run (including `--full`) without restarting from item zero.
 `index sync --full` clears and rebuilds lexical/vector indexes from scratch.
 `index enrich` updates metadata in place without rebuilding vectors.
 - `--field citation-key` (default): BBT RPC/BibTeX fallback enrichment.
 - `--field doi|journal`: patch missing values from source metadata pages.
 - `--field all`: run all enrichers in one pass.
-`index inspect` reports structured-field coverage (missing/present DOI, citation key, journal) with sample item keys.
+`index inspect` reports structured-field coverage from the registry-backed store (including DOI, citation key, journal, ISSN, volume, pages, language, and journal abbreviation) with sample item keys.
 
 Run semantic search:
 
@@ -214,7 +218,7 @@ Notes:
 - If `--doi` or `--citation-key` is provided, `zotq` first runs an exact identifier lookup in `keyword` mode on the selected backend route (`auto|source|index`). If no exact hit is found, it falls back to the requested search mode.
 - DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
 - Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
-- Local index search now stores normalized DOI/citation-key/journal columns with SQLite indexes, so structured filters are applied in SQL before ranking.
+- Local index search now stores structured DOI/citation-key/journal metadata in normalized SQLite tables (`item_fields`, `identifiers`) with indexed lookups; legacy normalized columns in `documents` remain for compatibility during migration.
 - During `index sync`/`index rebuild`, missing citation keys are enriched (batch Better BibTeX RPC first, then batch BibTeX parse fallback when available).
 
 Resolve citation key:
@@ -241,7 +245,12 @@ uv run zotq --mode local-api --output bib item get XVMVWQZX --style apa --locale
 uv run zotq --mode local-api --output bib search run "mantle hydration" --limit 5 --style apa
 uv run zotq --mode local-api --output bibtex item get XVMVWQZX
 uv run zotq --mode local-api --output bibtex search run "mantle hydration" --limit 5
+uv run zotq --mode local-api --output bibtex collection export C1 --format bibtex
+uv run zotq --mode local-api --output bibtex collection export C1 --format bibtex --include-children --batch-size 200
 ```
+
+`collection export` is source-backed (not index-backed) and paginates through collection items before batched BibTeX fetches.
+`--output bibtex` is required for this command.
 
 ## Embeddings
 - `local`: deterministic hashing model, no extra dependencies.

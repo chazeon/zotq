@@ -108,8 +108,12 @@ Click CLI
 ## 5. Search and Index Design
 
 ### 5.1 Current v1 Behavior
-- Local lexical index: SQLite + FTS5 (`documents`, `chunks`, `chunks_fts`).
-- Structured filter columns in `documents` (`doi_norm`, `citation_key_norm`, `journal_norm`) with SQLite indexes.
+- Local lexical index: SQLite + FTS5 with field-aware projection (`lexical_docs`, `lexical_fts`) plus compatibility chunk tables (`chunks`, `chunks_fts`).
+- Structured metadata dual-write during migration:
+  - Legacy normalized columns in `documents` (`doi_norm`, `citation_key_norm`, `journal_norm`).
+  - Normalized tables for field/identifier lookups (`item_fields`, `identifiers`) with indexed SQL filtering.
+  - Registry-driven fields currently include `doi`, `citation_key`, `journal`, `journal_abbreviation`, `issn`, `volume`, `pages`, `language`.
+  - Creator rows are stored in `item_creators` for normalized author metadata.
 - Local vector index: SQLite table of chunk embeddings.
 - Search modes:
   - `keyword`: FTS5/BM25-derived score.
@@ -121,7 +125,10 @@ Click CLI
   - `--backend source`: force source API search path.
   - `--backend index`: force local index search path.
 - Incremental sync default:
-  - `index sync` updates changed items only (content-hash based).
+  - `index sync` updates changed items with split hash checks:
+    - lexical hash for metadata/FTS updates.
+    - vector hash for semantic embedding refresh.
+  - Per-item ingest checkpoints (`mode`, `done`, `total`, `remaining_keys`) enable interruption-safe resume on next `index sync`.
   - `index sync --full` and `index rebuild` force full reprocessing.
 - Text extraction in v1 is metadata-first (title/abstract/creators/tags/date/type); attachment extraction remains pluggable roadmap work.
 - DOI filtering is normalized (`doi:`, `http(s)://doi.org/`, case/whitespace).
@@ -282,6 +289,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq item get KEY`
 - `zotq item citekey KEY [--prefer auto|json|extra|rpc|bibtex]`
 - `zotq collection list`
+- `zotq collection export KEY --format bibtex [--include-children] [--batch-size N]`
 - `zotq tag list`
 - `zotq index status`
 - `zotq index inspect`
@@ -367,9 +375,7 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - `remote`: API key or bearer token required for non-public libraries.
 - `zotq` should treat "zotbib-like" output as Zotero API bibliography formatting support (not dependency on a separate ZoteroBib backend service).
 
-### 6.9 Proposed Extension: Collection BibTeX Export
-This is a read-only candidate command for the next contract revision (not part of the locked v1 command list yet).
-
+### 6.9 Collection BibTeX Export
 - Command shape:
   - `zotq collection export KEY [options]`
 - Initial option contract:
@@ -383,12 +389,6 @@ This is a read-only candidate command for the next contract revision (not part o
   - Export should execute against source API pagination, not index ranking, to guarantee complete collection membership export.
 - Collection identity rule:
   - `KEY` is a collection key (stable identifier), not a display name.
-
-Gaps to close before implementation:
-- CLI/API contract gap: no `collection export` verb is modeled in contract definitions/tests today.
-- Pagination gap: existing `search run --collection ... --output bibtex` is query-limit based (`QuerySpec.limit`, max 500), so it cannot represent unbounded full export.
-- Traversal gap: no explicit policy for child/subcollection inclusion.
-- Verification gap: no tests currently assert complete collection export semantics across page boundaries and batch BibTeX fetch behavior.
 
 ## 7. Object and Data Models (Pydantic)
 

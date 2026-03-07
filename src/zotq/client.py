@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
 import re
@@ -444,6 +445,92 @@ class ZotQueryClient:
 
     def list_collections(self) -> list[Collection]:
         return self._source.list_collections()
+
+    def _collection_keys_for_export(self, collection_key: str, *, include_children: bool) -> list[str]:
+        root_key = collection_key.strip()
+        if not root_key:
+            return []
+        if not include_children:
+            return [root_key]
+
+        children_by_parent: dict[str, list[str]] = {}
+        for collection in self._source.list_collections():
+            parent = (collection.parent_collection or "").strip()
+            if not parent:
+                continue
+            children_by_parent.setdefault(parent, []).append(collection.key)
+
+        ordered: list[str] = [root_key]
+        seen = {root_key}
+        queue: deque[str] = deque([root_key])
+        while queue:
+            parent = queue.popleft()
+            for child in sorted(children_by_parent.get(parent, [])):
+                if child in seen:
+                    continue
+                seen.add(child)
+                ordered.append(child)
+                queue.append(child)
+        return ordered
+
+    def _collection_item_keys(self, collection_key: str, *, page_size: int) -> list[str]:
+        keys: list[str] = []
+        seen: set[str] = set()
+        offset = 0
+        while True:
+            query = QuerySpec(
+                backend=SearchBackend.SOURCE,
+                search_mode=SearchMode.KEYWORD,
+                collection=collection_key,
+                limit=page_size,
+                offset=offset,
+            )
+            hits = self._source.search_items(query)
+            if not hits:
+                break
+            for hit in hits:
+                key = hit.item.key.strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                keys.append(key)
+            if len(hits) < page_size:
+                break
+            offset += len(hits)
+        return keys
+
+    def export_collection_bibtex(
+        self,
+        collection_key: str,
+        *,
+        include_children: bool = False,
+        batch_size: int = 200,
+    ) -> str:
+        page_size = min(500, max(1, batch_size))
+        collection_keys = self._collection_keys_for_export(collection_key, include_children=include_children)
+        if not collection_keys:
+            return ""
+
+        ordered_item_keys: list[str] = []
+        seen_item_keys: set[str] = set()
+        for key in collection_keys:
+            for item_key in self._collection_item_keys(key, page_size=page_size):
+                if item_key in seen_item_keys:
+                    continue
+                seen_item_keys.add(item_key)
+                ordered_item_keys.append(item_key)
+
+        if not ordered_item_keys:
+            return ""
+
+        entries: list[str] = []
+        for start in range(0, len(ordered_item_keys), page_size):
+            batch = ordered_item_keys[start : start + page_size]
+            for chunk in self.get_items_bibtex(batch):
+                text = chunk.strip()
+                if text:
+                    entries.append(text)
+        return "\n\n".join(entries)
 
     def list_tags(self) -> list[Tag]:
         return self._source.list_tags()

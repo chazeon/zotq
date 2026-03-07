@@ -12,6 +12,7 @@ def test_v1_command_contract_contains_expected_commands() -> None:
     assert "item get" in names
     assert "item citekey" in names
     assert "collection list" in names
+    assert "collection export" in names
     assert "tag list" in names
     assert "index status" in names
     assert "index inspect" in names

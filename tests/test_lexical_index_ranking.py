@@ -214,6 +214,27 @@ def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Pat
 
     index = LexicalIndex(db_path)
     try:
+        rows = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT field_name, value_norm
+            FROM item_fields
+            WHERE item_key = 'LEGACY'
+            ORDER BY field_name
+            """
+        ).fetchall()
+        field_names = {str(row["field_name"]) for row in rows}
+        assert {"citation_key", "doi", "journal"}.issubset(field_names)
+
+        identifiers = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT id_type, id_norm
+            FROM identifiers
+            WHERE item_key = 'LEGACY'
+            ORDER BY id_type
+            """
+        ).fetchall()
+        assert [str(row["id_type"]) for row in identifiers] == ["citation_key", "doi"]
+
         hits = index.search_keyword(
             QuerySpec(
                 search_mode=SearchMode.KEYWORD,
@@ -224,6 +245,169 @@ def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Pat
             )
         )
         assert [hit.item.key for hit in hits] == ["LEGACY"]
+    finally:
+        index.close()
+
+
+def test_set_item_structured_fields_updates_v2_structured_rows(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="V2-UPDATE",
+            item_type="journalArticle",
+            title="Thermodynamics with the Gruneisen parameter",
+        )
+        _upsert(index, item, "thermodynamics gruneisen")
+
+        assert index.set_item_structured_fields(
+            "V2-UPDATE",
+            doi="doi:10.1016/j.pepi.2018.10.006",
+            citation_key="StaceyThermodynamicsGruneisenParameter2019",
+            journal="Physics of the Earth and Planetary Interiors",
+        )
+
+        summary = index.inspect_structured_fields(sample_limit=5)
+        assert summary["fields"]["doi"]["missing"] == 0
+        assert summary["fields"]["citation_key"]["missing"] == 0
+        assert summary["fields"]["journal"]["missing"] == 0
+
+        hits = index.search_keyword(
+            QuerySpec(
+                search_mode=SearchMode.KEYWORD,
+                doi="10.1016/j.pepi.2018.10.006",
+                citation_key="staceythermodynamicsgruneisenparameter2019",
+                journal="planetary interiors",
+                limit=5,
+            )
+        )
+        assert [hit.item.key for hit in hits] == ["V2-UPDATE"]
+
+        identifier_rows = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT id_type, id_norm
+            FROM identifiers
+            WHERE item_key = 'V2-UPDATE'
+            ORDER BY id_type
+            """
+        ).fetchall()
+        assert [str(row["id_type"]) for row in identifier_rows] == ["citation_key", "doi"]
+    finally:
+        index.close()
+
+
+def test_structured_field_registry_populates_extended_fields(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="EXT-FIELDS",
+            item_type="journalArticle",
+            title="Extended fields",
+            journal="Journal A",
+            journal_abbreviation="J. A.",
+            issn="1234-5678",
+            volume="42",
+            pages="100-120",
+            language="en-US",
+        )
+        _upsert(index, item, "extended metadata")
+
+        rows = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT field_name, value_norm
+            FROM item_fields
+            WHERE item_key = 'EXT-FIELDS'
+            ORDER BY field_name
+            """
+        ).fetchall()
+        values = {str(row["field_name"]): str(row["value_norm"]) for row in rows}
+
+        assert values["journal"] == "journal a"
+        assert values["journal_abbreviation"] == "j. a."
+        assert values["issn"] == "1234-5678"
+        assert values["volume"] == "42"
+        assert values["pages"] == "100-120"
+        assert values["language"] == "en-us"
+    finally:
+        index.close()
+
+
+def test_upsert_populates_creator_and_lexical_projection_tables(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="PROJ",
+            item_type="journalArticle",
+            title="Projection test",
+            abstract="Projection abstract",
+            journal="Projection Journal",
+            tags=["mantle", "hydration"],
+            creators=[
+                {"first_name": "Ada", "last_name": "Lovelace", "creator_type": "author"},  # type: ignore[arg-type]
+                {"first_name": "Grace", "last_name": "Hopper", "creator_type": "author"},  # type: ignore[arg-type]
+            ],
+        )
+        _upsert(index, item, "projection body text")
+
+        creator_rows = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT ordinal, family, given, key_norm
+            FROM item_creators
+            WHERE item_key = 'PROJ'
+            ORDER BY ordinal
+            """
+        ).fetchall()
+        assert len(creator_rows) == 2
+        assert str(creator_rows[0]["family"]) == "Lovelace"
+        assert str(creator_rows[0]["given"]) == "Ada"
+        assert str(creator_rows[0]["key_norm"]) == "lovelace ada"
+
+        projection = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT title, abstract, journal, creators, tags, body
+            FROM lexical_docs
+            WHERE item_key = 'PROJ'
+            """
+        ).fetchone()
+        assert projection is not None
+        assert str(projection["title"]) == "Projection test"
+        assert str(projection["abstract"]) == "Projection abstract"
+        assert str(projection["journal"]) == "Projection Journal"
+        assert "Ada Lovelace" in str(projection["creators"])
+        assert "mantle" in str(projection["tags"])
+        assert "projection body text" in str(projection["body"])
+
+        fts_rows = index._conn.execute(  # type: ignore[attr-defined]
+            """
+            SELECT COUNT(*) AS c
+            FROM lexical_fts
+            WHERE item_key = 'PROJ'
+            """
+        ).fetchone()
+        assert fts_rows is not None
+        assert int(fts_rows["c"]) == 1
+    finally:
+        index.close()
+
+
+def test_missing_field_detection_supports_registry_fields(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        with_issn = Item(
+            key="HAS-ISSN",
+            item_type="journalArticle",
+            title="Has ISSN",
+            issn="1111-2222",
+        )
+        without_issn = Item(
+            key="MISS-ISSN",
+            item_type="journalArticle",
+            title="No ISSN",
+        )
+        _upsert(index, with_issn, "issn item")
+        _upsert(index, without_issn, "missing issn item")
+
+        assert index.count_missing_field("issn") == 1
+        assert index.list_item_keys_missing_field("issn") == ["MISS-ISSN"]
     finally:
         index.close()
 

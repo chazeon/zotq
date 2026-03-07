@@ -2,16 +2,43 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import hashlib
 import json
 import sqlite3
+from typing import ClassVar
 from difflib import SequenceMatcher
 from pathlib import Path
 
 from ..models import ChunkRecord, Item, QuerySpec, SearchHit
 
 
+@dataclass(frozen=True)
+class StructuredFieldDef:
+    name: str
+    item_attr: str
+    normalizer: str = "text"
+    identifier_type: str | None = None
+
+
 class LexicalIndex:
     """Persistent lexical index built on SQLite + FTS5."""
+
+    _STRUCTURED_FIELDS: ClassVar[tuple[StructuredFieldDef, ...]] = (
+        StructuredFieldDef(name="doi", item_attr="doi", normalizer="doi", identifier_type="doi"),
+        StructuredFieldDef(
+            name="citation_key",
+            item_attr="citation_key",
+            normalizer="citation_key",
+            identifier_type="citation_key",
+        ),
+        StructuredFieldDef(name="journal", item_attr="journal", normalizer="journal"),
+        StructuredFieldDef(name="journal_abbreviation", item_attr="journal_abbreviation", normalizer="journal"),
+        StructuredFieldDef(name="issn", item_attr="issn", normalizer="text"),
+        StructuredFieldDef(name="volume", item_attr="volume", normalizer="text"),
+        StructuredFieldDef(name="pages", item_attr="pages", normalizer="text"),
+        StructuredFieldDef(name="language", item_attr="language", normalizer="text"),
+    )
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -35,6 +62,8 @@ class LexicalIndex:
                 tags TEXT,
                 full_text TEXT,
                 content_hash TEXT,
+                lexical_hash TEXT,
+                vector_hash TEXT,
                 doi_norm TEXT,
                 citation_key_norm TEXT,
                 journal_norm TEXT
@@ -53,27 +82,80 @@ class LexicalIndex:
                 text,
                 tokenize='unicode61'
             );
+
+            CREATE TABLE IF NOT EXISTS item_fields (
+                item_key TEXT NOT NULL,
+                field_name TEXT NOT NULL,
+                ordinal INTEGER NOT NULL DEFAULT 0,
+                value_raw TEXT,
+                value_norm TEXT,
+                value_hash TEXT NOT NULL,
+                PRIMARY KEY (item_key, field_name, ordinal)
+            );
+
+            CREATE TABLE IF NOT EXISTS identifiers (
+                id_type TEXT NOT NULL,
+                id_norm TEXT NOT NULL,
+                item_key TEXT NOT NULL,
+                PRIMARY KEY (id_type, id_norm, item_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS item_creators (
+                item_key TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                creator_type TEXT,
+                family TEXT,
+                given TEXT,
+                full_norm TEXT,
+                key_norm TEXT,
+                PRIMARY KEY (item_key, ordinal)
+            );
+
+            CREATE TABLE IF NOT EXISTS lexical_docs (
+                item_key TEXT PRIMARY KEY,
+                title TEXT,
+                abstract TEXT,
+                journal TEXT,
+                creators TEXT,
+                tags TEXT,
+                body TEXT
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS lexical_fts USING fts5(
+                item_key UNINDEXED,
+                title,
+                abstract,
+                journal,
+                creators,
+                tags,
+                body,
+                tokenize='unicode61 remove_diacritics 2'
+            );
             """
         )
         self._ensure_documents_columns()
+        self._ensure_structured_tables()
 
     def _ensure_documents_columns(self) -> None:
         rows = self._conn.execute("PRAGMA table_info(documents)").fetchall()
         columns = {str(row["name"]) for row in rows}
-        changed = False
+        normalized_changed = False
         with self._conn:
             if "content_hash" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
-                changed = True
+            if "lexical_hash" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN lexical_hash TEXT")
+            if "vector_hash" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN vector_hash TEXT")
             if "doi_norm" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN doi_norm TEXT")
-                changed = True
+                normalized_changed = True
             if "citation_key_norm" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN citation_key_norm TEXT")
-                changed = True
+                normalized_changed = True
             if "journal_norm" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN journal_norm TEXT")
-                changed = True
+                normalized_changed = True
 
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_doi_norm ON documents(doi_norm)")
             self._conn.execute(
@@ -81,8 +163,243 @@ class LexicalIndex:
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_journal_norm ON documents(journal_norm)")
 
-        if changed:
+        if normalized_changed:
             self._backfill_normalized_columns()
+
+    def _ensure_structured_tables(self) -> None:
+        with self._conn:
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_item_fields_name_norm ON item_fields(field_name, value_norm, item_key)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_identifiers_type_norm ON identifiers(id_type, id_norm, item_key)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_item_creators_key_norm ON item_creators(key_norm, item_key, ordinal)"
+            )
+        self._backfill_structured_tables()
+        self._backfill_creator_rows()
+        self._backfill_lexical_projection()
+
+    @staticmethod
+    def _field_value_hash(raw_value: str, normalized_value: str) -> str:
+        payload = f"{raw_value}\u001f{normalized_value}"
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _structured_field_defs(cls) -> tuple[StructuredFieldDef, ...]:
+        return cls._STRUCTURED_FIELDS
+
+    @classmethod
+    def _structured_field_names(cls) -> tuple[str, ...]:
+        return tuple(field.name for field in cls._structured_field_defs())
+
+    @classmethod
+    def _structured_field_def(cls, field_name: str) -> StructuredFieldDef:
+        for field in cls._structured_field_defs():
+            if field.name == field_name:
+                return field
+        raise ValueError(f"Unsupported field for structured inspection: {field_name}")
+
+    @staticmethod
+    def _normalize_text(value: str | None) -> str:
+        return " ".join((value or "").strip().lower().split())
+
+    @classmethod
+    def _normalize_for_field(cls, field: StructuredFieldDef, value: str | None) -> str:
+        if field.normalizer == "doi":
+            return cls._normalize_doi(value)
+        if field.normalizer == "citation_key":
+            return cls._normalize_citation_key(value)
+        if field.normalizer == "journal":
+            return cls._normalize_journal(value)
+        return cls._normalize_text(value)
+
+    def _upsert_structured_rows(self, item: Item) -> None:
+        field_norm_values: dict[str, str] = {}
+        field_raw_values: dict[str, str] = {}
+        for field in self._structured_field_defs():
+            raw_value = str(getattr(item, field.item_attr) or "").strip()
+            field_raw_values[field.name] = raw_value
+            field_norm_values[field.name] = self._normalize_for_field(field, raw_value)
+
+        with self._conn:
+            for field in self._structured_field_defs():
+                raw_value = field_raw_values[field.name]
+                norm_value = field_norm_values[field.name]
+                self._conn.execute(
+                    """
+                    INSERT INTO item_fields(item_key, field_name, ordinal, value_raw, value_norm, value_hash)
+                    VALUES (?, ?, 0, ?, ?, ?)
+                    ON CONFLICT(item_key, field_name, ordinal) DO UPDATE SET
+                        value_raw=excluded.value_raw,
+                        value_norm=excluded.value_norm,
+                        value_hash=excluded.value_hash
+                    """,
+                    (item.key, field.name, raw_value, norm_value, self._field_value_hash(raw_value, norm_value)),
+                )
+
+            identifier_fields = [field for field in self._structured_field_defs() if field.identifier_type]
+            if identifier_fields:
+                placeholders = ",".join("?" for _ in identifier_fields)
+                params: list[object] = [item.key]
+                params.extend(field.identifier_type for field in identifier_fields if field.identifier_type)
+                self._conn.execute(
+                    f"DELETE FROM identifiers WHERE item_key = ? AND id_type IN ({placeholders})",
+                    tuple(params),
+                )
+
+            for field in identifier_fields:
+                if not field.identifier_type:
+                    continue
+                norm_value = field_norm_values[field.name]
+                if not norm_value:
+                    continue
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO identifiers(id_type, id_norm, item_key) VALUES (?, ?, ?)",
+                    (field.identifier_type, norm_value, item.key),
+                )
+
+    def _upsert_creator_rows(self, item: Item) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM item_creators WHERE item_key = ?", (item.key,))
+            for ordinal, creator in enumerate(item.creators):
+                family = (creator.last_name or "").strip()
+                given = (creator.first_name or "").strip()
+                full = " ".join(part for part in [given, family] if part).strip()
+                key_norm = self._normalize_text(" ".join(part for part in [family, given] if part))
+                self._conn.execute(
+                    """
+                    INSERT INTO item_creators(
+                        item_key, ordinal, creator_type, family, given, full_norm, key_norm
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.key,
+                        ordinal,
+                        creator.creator_type,
+                        family,
+                        given,
+                        self._normalize_text(full),
+                        key_norm,
+                    ),
+                )
+
+    def _upsert_lexical_projection(self, item: Item, *, full_text: str) -> None:
+        creators_blob = self._creators_blob(item)
+        tags_blob = ", ".join(item.tags)
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO lexical_docs(item_key, title, abstract, journal, creators, tags, body)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_key) DO UPDATE SET
+                    title=excluded.title,
+                    abstract=excluded.abstract,
+                    journal=excluded.journal,
+                    creators=excluded.creators,
+                    tags=excluded.tags,
+                    body=excluded.body
+                """,
+                (
+                    item.key,
+                    item.title or "",
+                    item.abstract or "",
+                    item.journal or "",
+                    creators_blob,
+                    tags_blob,
+                    full_text or "",
+                ),
+            )
+            self._conn.execute("DELETE FROM lexical_fts WHERE item_key = ?", (item.key,))
+            self._conn.execute(
+                """
+                INSERT INTO lexical_fts(item_key, title, abstract, journal, creators, tags, body)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item.key,
+                    item.title or "",
+                    item.abstract or "",
+                    item.journal or "",
+                    creators_blob,
+                    tags_blob,
+                    full_text or "",
+                ),
+            )
+
+    def _backfill_structured_tables(self) -> None:
+        field_names = self._structured_field_names()
+        if not field_names:
+            return
+        placeholders = ",".join("?" for _ in field_names)
+        params: tuple[object, ...] = tuple(field_names) + (len(field_names),)
+        rows = self._conn.execute(
+            f"""
+            SELECT d.item_key, d.item_json
+            FROM documents d
+            WHERE (
+                SELECT COUNT(*)
+                FROM item_fields f
+                WHERE f.item_key = d.item_key
+                  AND f.field_name IN ({placeholders})
+                  AND f.ordinal = 0
+            ) < ?
+            ORDER BY d.item_key
+            """,
+            params,
+        ).fetchall()
+        if not rows:
+            return
+
+        for row in rows:
+            try:
+                item = Item.model_validate_json(str(row["item_json"] or ""))
+            except Exception:
+                continue
+            self._upsert_structured_rows(item)
+
+    def _backfill_creator_rows(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT d.item_key, d.item_json
+            FROM documents d
+            LEFT JOIN item_creators c
+              ON c.item_key = d.item_key
+            WHERE c.item_key IS NULL
+            ORDER BY d.item_key
+            """
+        ).fetchall()
+        if not rows:
+            return
+        for row in rows:
+            try:
+                item = Item.model_validate_json(str(row["item_json"] or ""))
+            except Exception:
+                continue
+            self._upsert_creator_rows(item)
+
+    def _backfill_lexical_projection(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT d.item_key, d.item_json, d.full_text
+            FROM documents d
+            LEFT JOIN lexical_docs ld
+              ON ld.item_key = d.item_key
+            WHERE ld.item_key IS NULL
+            ORDER BY d.item_key
+            """
+        ).fetchall()
+        if not rows:
+            return
+        for row in rows:
+            try:
+                item = Item.model_validate_json(str(row["item_json"] or ""))
+            except Exception:
+                continue
+            full_text = str(row["full_text"] or "")
+            self._upsert_lexical_projection(item, full_text=full_text)
 
     def _backfill_normalized_columns(self) -> None:
         rows = self._conn.execute(
@@ -134,7 +451,16 @@ class LexicalIndex:
             for creator in item.creators
         )
 
-    def upsert_item(self, item: Item, chunks: list[ChunkRecord], full_text: str, *, content_hash: str | None = None) -> None:
+    def upsert_item(
+        self,
+        item: Item,
+        chunks: list[ChunkRecord],
+        full_text: str,
+        *,
+        content_hash: str | None = None,
+        lexical_hash: str | None = None,
+        vector_hash: str | None = None,
+    ) -> None:
         item_json = item.model_dump_json()
         creators_blob = self._creators_blob(item)
         tags_blob = ",".join(item.tags)
@@ -147,9 +473,9 @@ class LexicalIndex:
                 """
                 INSERT INTO documents(
                     item_key, item_json, title, item_type, date, creators, tags, full_text,
-                    content_hash, doi_norm, citation_key_norm, journal_norm
+                    content_hash, lexical_hash, vector_hash, doi_norm, citation_key_norm, journal_norm
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(item_key) DO UPDATE SET
                     item_json=excluded.item_json,
                     title=excluded.title,
@@ -159,6 +485,8 @@ class LexicalIndex:
                     tags=excluded.tags,
                     full_text=excluded.full_text,
                     content_hash=excluded.content_hash,
+                    lexical_hash=excluded.lexical_hash,
+                    vector_hash=excluded.vector_hash,
                     doi_norm=excluded.doi_norm,
                     citation_key_norm=excluded.citation_key_norm,
                     journal_norm=excluded.journal_norm
@@ -173,6 +501,8 @@ class LexicalIndex:
                     tags_blob,
                     full_text,
                     content_hash,
+                    lexical_hash,
+                    vector_hash,
                     doi_norm,
                     citation_key_norm,
                     journal_norm,
@@ -191,11 +521,19 @@ class LexicalIndex:
                     "INSERT INTO chunks_fts(chunk_id, item_key, text) VALUES (?, ?, ?)",
                     (chunk.chunk_id, chunk.item_key, chunk.text),
                 )
+        self._upsert_structured_rows(item)
+        self._upsert_creator_rows(item)
+        self._upsert_lexical_projection(item, full_text=full_text)
 
     def clear(self) -> None:
         with self._conn:
+            self._conn.execute("DELETE FROM lexical_fts")
+            self._conn.execute("DELETE FROM lexical_docs")
             self._conn.execute("DELETE FROM chunks_fts")
             self._conn.execute("DELETE FROM chunks")
+            self._conn.execute("DELETE FROM item_creators")
+            self._conn.execute("DELETE FROM identifiers")
+            self._conn.execute("DELETE FROM item_fields")
             self._conn.execute("DELETE FROM documents")
 
     def document_count(self) -> int:
@@ -213,57 +551,56 @@ class LexicalIndex:
         return Item.model_validate_json(row["item_json"])
 
     def list_item_keys_missing_citation_key(self) -> list[str]:
-        rows = self._conn.execute(
-            """
-            SELECT item_key
-            FROM documents
-            WHERE citation_key_norm IS NULL OR citation_key_norm = ''
-            ORDER BY item_key
-            """
-        ).fetchall()
-        return [str(row["item_key"]) for row in rows]
+        return self.list_item_keys_missing_field("citation_key")
 
-    @staticmethod
-    def _norm_column_for_field(field: str) -> str:
-        mapping = {
-            "doi": "doi_norm",
-            "citation_key": "citation_key_norm",
-            "journal": "journal_norm",
-        }
-        column = mapping.get(field)
-        if column is None:
+    @classmethod
+    def _normalize_field_name(cls, field: str) -> str:
+        normalized = field.strip().lower()
+        if normalized not in set(cls._structured_field_names()):
             raise ValueError(f"Unsupported field for structured inspection: {field}")
-        return column
+        return normalized
 
     def list_item_keys_missing_field(self, field: str, *, limit: int | None = None) -> list[str]:
-        column = self._norm_column_for_field(field)
-        sql = f"""
-            SELECT item_key
-            FROM documents
-            WHERE {column} IS NULL OR {column} = ''
-            ORDER BY item_key
+        field_name = self._normalize_field_name(field)
+        sql = """
+            SELECT d.item_key
+            FROM documents d
+            LEFT JOIN item_fields f
+              ON f.item_key = d.item_key
+             AND f.field_name = ?
+             AND f.ordinal = 0
+            WHERE COALESCE(f.value_norm, '') = ''
+            ORDER BY d.item_key
         """
+        params_list: list[object] = [field_name]
         params: tuple[object, ...] = ()
         if limit is not None:
             sql += "\nLIMIT ?"
-            params = (max(0, limit),)
+            params_list.append(max(0, limit))
+        params = tuple(params_list)
         rows = self._conn.execute(sql, params).fetchall()
         return [str(row["item_key"]) for row in rows]
 
     def count_missing_field(self, field: str) -> int:
-        column = self._norm_column_for_field(field)
+        field_name = self._normalize_field_name(field)
         row = self._conn.execute(
-            f"""
-            SELECT COUNT(*) AS c
-            FROM documents
-            WHERE {column} IS NULL OR {column} = ''
             """
+            SELECT COUNT(*) AS c
+            FROM documents d
+            LEFT JOIN item_fields f
+              ON f.item_key = d.item_key
+             AND f.field_name = ?
+             AND f.ordinal = 0
+            WHERE COALESCE(f.value_norm, '') = ''
+            """
+            ,
+            (field_name,),
         ).fetchone()
         return int(row["c"]) if row else 0
 
     def inspect_structured_fields(self, *, sample_limit: int = 5) -> dict[str, object]:
         doc_count = self.document_count()
-        fields = ["doi", "citation_key", "journal"]
+        fields = list(self._structured_field_names())
         details: dict[str, object] = {}
         for field in fields:
             missing = self.count_missing_field(field)
@@ -275,6 +612,7 @@ class LexicalIndex:
             }
         return {
             "documents": doc_count,
+            "storage": "item_fields_v2",
             "fields": details,
         }
 
@@ -332,6 +670,7 @@ class LexicalIndex:
                     item_key,
                 ),
             )
+        self._upsert_structured_rows(item)
         return True
 
     def get_content_hash(self, item_key: str) -> str | None:
@@ -341,25 +680,69 @@ class LexicalIndex:
         value = row["content_hash"]
         return str(value) if value else None
 
+    def get_item_hashes(self, item_key: str) -> tuple[str | None, str | None, str | None]:
+        row = self._conn.execute(
+            """
+            SELECT lexical_hash, vector_hash, content_hash
+            FROM documents
+            WHERE item_key = ?
+            """,
+            (item_key,),
+        ).fetchone()
+        if row is None:
+            return None, None, None
+        lexical_hash = str(row["lexical_hash"]) if row["lexical_hash"] else None
+        vector_hash = str(row["vector_hash"]) if row["vector_hash"] else None
+        content_hash = str(row["content_hash"]) if row["content_hash"] else None
+        return lexical_hash, vector_hash, content_hash
+
+    def set_item_hashes(
+        self,
+        item_key: str,
+        *,
+        lexical_hash: str | None = None,
+        vector_hash: str | None = None,
+        content_hash: str | None = None,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[object] = []
+        if lexical_hash is not None:
+            updates.append("lexical_hash = ?")
+            params.append(lexical_hash)
+        if vector_hash is not None:
+            updates.append("vector_hash = ?")
+            params.append(vector_hash)
+        if content_hash is not None:
+            updates.append("content_hash = ?")
+            params.append(content_hash)
+        if not updates:
+            return False
+
+        params.append(item_key)
+        with self._conn:
+            cursor = self._conn.execute(
+                f"UPDATE documents SET {', '.join(updates)} WHERE item_key = ?",
+                tuple(params),
+            )
+        return cursor.rowcount > 0
+
     def search_keyword(self, query: QuerySpec) -> list[SearchHit]:
         if not query.text:
             return self._search_by_filters_only(query, mode_name="keyword")
 
         filter_where, filter_params = self._structured_filter_sql(query, table_alias="documents")
-        where_clauses = ["chunks_fts MATCH ?"]
+        where_clauses = ["lexical_fts MATCH ?"]
         params: list[object] = [query.text]
         if filter_where:
             where_clauses.append(filter_where)
             params.extend(filter_params)
         where_sql = " AND ".join(where_clauses)
 
-        # bm25() cannot be used safely inside grouped aggregate expressions on all SQLite builds,
-        # so collect chunk-level results first and then collapse to unique item keys in Python.
         cursor = self._conn.execute(
             f"""
-            SELECT chunks_fts.item_key, bm25(chunks_fts) AS score
-            FROM chunks_fts
-            JOIN documents ON documents.item_key = chunks_fts.item_key
+            SELECT lexical_fts.item_key, bm25(lexical_fts, 0.0, 3.0, 1.6, 1.8, 1.2, 1.0, 0.9) AS score
+            FROM lexical_fts
+            JOIN documents ON documents.item_key = lexical_fts.item_key
             WHERE {where_sql}
             ORDER BY score
             LIMIT ?
@@ -372,13 +755,7 @@ class LexicalIndex:
         for row in rows:
             item_key = row["item_key"]
             score = float(row["score"]) if row["score"] is not None else None
-            if item_key not in best_by_item:
-                best_by_item[item_key] = score
-            else:
-                prev = best_by_item[item_key]
-                # Smaller raw BM25 is better in SQLite FTS5.
-                if prev is None or (score is not None and score < prev):
-                    best_by_item[item_key] = score
+            best_by_item[item_key] = score
 
         ranked: list[tuple[float, bool, str, Item]] = []
         for key, raw_score in best_by_item.items():
@@ -403,11 +780,18 @@ class LexicalIndex:
             return self._search_by_filters_only(query, mode_name="fuzzy")
 
         target = query.text.lower()
-        filter_where, filter_params = self._structured_filter_sql(query)
-        sql = "SELECT item_json, title, full_text FROM documents"
+        filter_where, filter_params = self._structured_filter_sql(query, table_alias="documents")
+        sql = """
+            SELECT
+                documents.item_json AS item_json,
+                COALESCE(lexical_docs.title, documents.title, '') AS title,
+                COALESCE(lexical_docs.body, documents.full_text, '') AS full_text
+            FROM documents
+            LEFT JOIN lexical_docs ON lexical_docs.item_key = documents.item_key
+        """
         if filter_where:
             sql += f" WHERE {filter_where}"
-        sql += " ORDER BY item_key"
+        sql += " ORDER BY documents.item_key"
         rows = self._conn.execute(sql, tuple(filter_params)).fetchall()
 
         scored: list[tuple[float, bool, str, Item]] = []
@@ -500,23 +884,29 @@ class LexicalIndex:
         *,
         table_alias: str = "",
     ) -> tuple[str, list[object]]:
-        prefix = f"{table_alias}." if table_alias else ""
+        item_key_ref = f"{table_alias}.item_key" if table_alias else "item_key"
         clauses: list[str] = []
         params: list[object] = []
 
         doi_norm = cls._normalize_doi(query.doi)
         if doi_norm:
-            clauses.append(f"{prefix}doi_norm = ?")
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM identifiers i WHERE i.item_key = {item_key_ref} AND i.id_type = 'doi' AND i.id_norm = ?)"
+            )
             params.append(doi_norm)
 
         citation_key_norm = cls._normalize_citation_key(query.citation_key)
         if citation_key_norm:
-            clauses.append(f"{prefix}citation_key_norm = ?")
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM identifiers i WHERE i.item_key = {item_key_ref} AND i.id_type = 'citation_key' AND i.id_norm = ?)"
+            )
             params.append(citation_key_norm)
 
         journal_norm = cls._normalize_journal(query.journal)
         if journal_norm:
-            clauses.append(f"{prefix}journal_norm LIKE ?")
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM item_fields f WHERE f.item_key = {item_key_ref} AND f.field_name = 'journal' AND f.value_norm LIKE ?)"
+            )
             params.append(f"%{journal_norm}%")
 
         return " AND ".join(clauses), params

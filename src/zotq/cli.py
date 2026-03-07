@@ -377,6 +377,35 @@ def collection_list(runtime: RuntimeContext) -> None:
     click.echo(render_payload(payload, runtime.output))
 
 
+@collection_group.command("export")
+@click.argument("key", required=True)
+@click.option("export_format", "--format", type=click.Choice(["bibtex"]), default="bibtex", show_default=True)
+@click.option("include_children", "--include-children/--no-include-children", default=False, show_default=True)
+@click.option("batch_size", "--batch-size", type=click.IntRange(1, 500), default=200, show_default=True)
+@pass_runtime
+def collection_export(
+    runtime: RuntimeContext,
+    key: str,
+    export_format: str,
+    include_children: bool,
+    batch_size: int,
+) -> None:
+    if export_format != "bibtex":
+        raise click.ClickException(f"Unsupported collection export format: {export_format}")
+    if runtime.output != OutputFormat.BIBTEX:
+        raise click.ClickException("collection export requires --output bibtex.")
+
+    try:
+        payload = runtime.client.export_collection_bibtex(
+            key,
+            include_children=include_children,
+            batch_size=batch_size,
+        )
+    except (BackendConnectionError, IndexNotReadyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(render_payload(payload, runtime.output))
+
+
 @main.group("tag")
 def tag_group() -> None:
     """Tag operations."""

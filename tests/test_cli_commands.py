@@ -468,6 +468,141 @@ def test_item_get_bibtex_rejects_csl_flags() -> None:
     assert "only supported with --output bib" in result.output
 
 
+def test_collection_export_requires_bibtex_output() -> None:
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "collection",
+            "export",
+            "C1",
+            "--format",
+            "bibtex",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "requires --output bibtex" in result.output
+
+
+@respx.mock
+def test_collection_export_bibtex_paginates_and_batches() -> None:
+    respx.get(
+        "http://remote.test/users/0/collections/C1/items",
+        params={"limit": 100, "start": 0},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K1", "data": {"itemType": "journalArticle", "title": "First"}},
+                {"key": "K2", "data": {"itemType": "journalArticle", "title": "Second"}},
+            ],
+        )
+    )
+    respx.get(
+        "http://remote.test/users/0/collections/C1/items",
+        params={"limit": 100, "start": 2},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K3", "data": {"itemType": "journalArticle", "title": "Third"}},
+            ],
+        )
+    )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,K2", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{k1,}\n\n@article{k2,}")
+    )
+    respx.get("http://remote.test/users/0/items", params={"itemKey": "K3", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{k3,}")
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bibtex",
+            "collection",
+            "export",
+            "C1",
+            "--format",
+            "bibtex",
+            "--batch-size",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "@article{k1" in result.output
+    assert "@article{k2" in result.output
+    assert "@article{k3" in result.output
+
+
+@respx.mock
+def test_collection_export_include_children_traverses_descendants() -> None:
+    respx.get("http://remote.test/users/0/collections").mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "C1", "data": {"name": "Root", "parentCollection": None}},
+                {"key": "C2", "data": {"name": "Child", "parentCollection": "C1"}},
+                {"key": "C9", "data": {"name": "Other", "parentCollection": None}},
+            ],
+        )
+    )
+    respx.get(
+        "http://remote.test/users/0/collections/C1/items",
+        params={"limit": 100, "start": 0},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K1", "data": {"itemType": "journalArticle", "title": "First"}},
+            ],
+        )
+    )
+    respx.get(
+        "http://remote.test/users/0/collections/C2/items",
+        params={"limit": 100, "start": 0},
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"key": "K1", "data": {"itemType": "journalArticle", "title": "First"}},
+                {"key": "K2", "data": {"itemType": "journalArticle", "title": "Second"}},
+            ],
+        )
+    )
+    bib_route = respx.get("http://remote.test/users/0/items", params={"itemKey": "K1,K2", "format": "bibtex"}).mock(
+        return_value=Response(200, text="@article{k1,}\n\n@article{k2,}")
+    )
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "bibtex",
+            "collection",
+            "export",
+            "C1",
+            "--format",
+            "bibtex",
+            "--include-children",
+            "--batch-size",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "@article{k1" in result.output
+    assert "@article{k2" in result.output
+    assert bib_route.called is True
+
+
 @respx.mock
 def test_index_sync_full_returns_ready_status() -> None:
     respx.get("http://remote.test/users/0/items").mock(
