@@ -107,6 +107,7 @@ Click CLI
 
 ### 5.1 Current v1 Behavior
 - Local lexical index: SQLite + FTS5 (`documents`, `chunks`, `chunks_fts`).
+- Structured filter columns in `documents` (`doi_norm`, `citation_key_norm`, `journal_norm`) with SQLite indexes.
 - Local vector index: SQLite table of chunk embeddings.
 - Search modes:
   - `keyword`: FTS5/BM25-derived score.
@@ -288,6 +289,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `--doi`
 - `--journal`
 - `--citation-key`
+- `--citekey` / `--bibkey` (aliases of `--citation-key`)
 - `--search-mode [keyword|fuzzy|semantic|hybrid]`
 - `--allow-fallback/--no-allow-fallback`
 - `--title`

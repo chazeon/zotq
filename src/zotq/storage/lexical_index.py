@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -33,7 +34,10 @@ class LexicalIndex:
                 creators TEXT,
                 tags TEXT,
                 full_text TEXT,
-                content_hash TEXT
+                content_hash TEXT,
+                doi_norm TEXT,
+                citation_key_norm TEXT,
+                journal_norm TEXT
             );
 
             CREATE TABLE IF NOT EXISTS chunks (
@@ -56,9 +60,72 @@ class LexicalIndex:
     def _ensure_documents_columns(self) -> None:
         rows = self._conn.execute("PRAGMA table_info(documents)").fetchall()
         columns = {str(row["name"]) for row in rows}
-        if "content_hash" not in columns:
-            with self._conn:
+        changed = False
+        with self._conn:
+            if "content_hash" not in columns:
                 self._conn.execute("ALTER TABLE documents ADD COLUMN content_hash TEXT")
+                changed = True
+            if "doi_norm" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN doi_norm TEXT")
+                changed = True
+            if "citation_key_norm" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN citation_key_norm TEXT")
+                changed = True
+            if "journal_norm" not in columns:
+                self._conn.execute("ALTER TABLE documents ADD COLUMN journal_norm TEXT")
+                changed = True
+
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_doi_norm ON documents(doi_norm)")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_citation_key_norm ON documents(citation_key_norm)"
+            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_journal_norm ON documents(journal_norm)")
+
+        if changed:
+            self._backfill_normalized_columns()
+
+    def _backfill_normalized_columns(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT item_key, item_json
+            FROM documents
+            WHERE doi_norm IS NULL OR citation_key_norm IS NULL OR journal_norm IS NULL
+            """
+        ).fetchall()
+        if not rows:
+            return
+
+        with self._conn:
+            for row in rows:
+                item_key = str(row["item_key"])
+                item_json = str(row["item_json"] or "")
+                doi = ""
+                citation_key = ""
+                journal = ""
+
+                try:
+                    item = Item.model_validate_json(item_json)
+                    doi = self._normalize_doi(item.doi)
+                    citation_key = self._normalize_citation_key(item.citation_key)
+                    journal = self._normalize_journal(item.journal)
+                except Exception:
+                    try:
+                        payload = json.loads(item_json)
+                    except Exception:
+                        payload = {}
+                    if isinstance(payload, dict):
+                        doi = self._normalize_doi(payload.get("doi"))  # type: ignore[arg-type]
+                        citation_key = self._normalize_citation_key(payload.get("citation_key"))  # type: ignore[arg-type]
+                        journal = self._normalize_journal(payload.get("journal"))  # type: ignore[arg-type]
+
+                self._conn.execute(
+                    """
+                    UPDATE documents
+                    SET doi_norm = ?, citation_key_norm = ?, journal_norm = ?
+                    WHERE item_key = ?
+                    """,
+                    (doi, citation_key, journal, item_key),
+                )
 
     @staticmethod
     def _creators_blob(item: Item) -> str:
@@ -71,12 +138,18 @@ class LexicalIndex:
         item_json = item.model_dump_json()
         creators_blob = self._creators_blob(item)
         tags_blob = ",".join(item.tags)
+        doi_norm = self._normalize_doi(item.doi)
+        citation_key_norm = self._normalize_citation_key(item.citation_key)
+        journal_norm = self._normalize_journal(item.journal)
 
         with self._conn:
             self._conn.execute(
                 """
-                INSERT INTO documents(item_key, item_json, title, item_type, date, creators, tags, full_text, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents(
+                    item_key, item_json, title, item_type, date, creators, tags, full_text,
+                    content_hash, doi_norm, citation_key_norm, journal_norm
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(item_key) DO UPDATE SET
                     item_json=excluded.item_json,
                     title=excluded.title,
@@ -85,7 +158,10 @@ class LexicalIndex:
                     creators=excluded.creators,
                     tags=excluded.tags,
                     full_text=excluded.full_text,
-                    content_hash=excluded.content_hash
+                    content_hash=excluded.content_hash,
+                    doi_norm=excluded.doi_norm,
+                    citation_key_norm=excluded.citation_key_norm,
+                    journal_norm=excluded.journal_norm
                 """,
                 (
                     item.key,
@@ -97,6 +173,9 @@ class LexicalIndex:
                     tags_blob,
                     full_text,
                     content_hash,
+                    doi_norm,
+                    citation_key_norm,
+                    journal_norm,
                 ),
             )
 
@@ -144,17 +223,26 @@ class LexicalIndex:
         if not query.text:
             return self._search_by_filters_only(query, mode_name="keyword")
 
+        filter_where, filter_params = self._structured_filter_sql(query, table_alias="documents")
+        where_clauses = ["chunks_fts MATCH ?"]
+        params: list[object] = [query.text]
+        if filter_where:
+            where_clauses.append(filter_where)
+            params.extend(filter_params)
+        where_sql = " AND ".join(where_clauses)
+
         # bm25() cannot be used safely inside grouped aggregate expressions on all SQLite builds,
         # so collect chunk-level results first and then collapse to unique item keys in Python.
         cursor = self._conn.execute(
-            """
-            SELECT item_key, bm25(chunks_fts) AS score
+            f"""
+            SELECT chunks_fts.item_key, bm25(chunks_fts) AS score
             FROM chunks_fts
-            WHERE chunks_fts MATCH ?
+            JOIN documents ON documents.item_key = chunks_fts.item_key
+            WHERE {where_sql}
             ORDER BY score
             LIMIT ?
             """,
-            (query.text, max((query.limit + query.offset) * 20, 200)),
+            tuple(params + [max((query.limit + query.offset) * 20, 200)]),
         )
         rows = cursor.fetchall()
 
@@ -193,9 +281,12 @@ class LexicalIndex:
             return self._search_by_filters_only(query, mode_name="fuzzy")
 
         target = query.text.lower()
-        rows = self._conn.execute(
-            "SELECT item_json, title, full_text FROM documents ORDER BY item_key"
-        ).fetchall()
+        filter_where, filter_params = self._structured_filter_sql(query)
+        sql = "SELECT item_json, title, full_text FROM documents"
+        if filter_where:
+            sql += f" WHERE {filter_where}"
+        sql += " ORDER BY item_key"
+        rows = self._conn.execute(sql, tuple(filter_params)).fetchall()
 
         scored: list[tuple[float, bool, str, Item]] = []
         for row in rows:
@@ -276,13 +367,55 @@ class LexicalIndex:
     def _normalize_citation_key(value: str | None) -> str:
         return (value or "").strip().lower()
 
+    @staticmethod
+    def _normalize_journal(value: str | None) -> str:
+        return " ".join((value or "").strip().lower().split())
+
+    @classmethod
+    def _structured_filter_sql(
+        cls,
+        query: QuerySpec,
+        *,
+        table_alias: str = "",
+    ) -> tuple[str, list[object]]:
+        prefix = f"{table_alias}." if table_alias else ""
+        clauses: list[str] = []
+        params: list[object] = []
+
+        doi_norm = cls._normalize_doi(query.doi)
+        if doi_norm:
+            clauses.append(f"{prefix}doi_norm = ?")
+            params.append(doi_norm)
+
+        citation_key_norm = cls._normalize_citation_key(query.citation_key)
+        if citation_key_norm:
+            clauses.append(f"{prefix}citation_key_norm = ?")
+            params.append(citation_key_norm)
+
+        journal_norm = cls._normalize_journal(query.journal)
+        if journal_norm:
+            clauses.append(f"{prefix}journal_norm LIKE ?")
+            params.append(f"%{journal_norm}%")
+
+        return " AND ".join(clauses), params
+
+    def item_keys_for_structured_filters(self, query: QuerySpec) -> set[str] | None:
+        where_sql, params = self._structured_filter_sql(query, table_alias="documents")
+        if not where_sql:
+            return None
+        rows = self._conn.execute(
+            f"SELECT item_key FROM documents WHERE {where_sql} ORDER BY item_key",
+            tuple(params),
+        ).fetchall()
+        return {str(row["item_key"]) for row in rows}
+
     @classmethod
     def _matches_filters(cls, item: Item, query: QuerySpec) -> bool:
         if query.title and query.title.lower() not in (item.title or "").lower():
             return False
         if query.doi and cls._normalize_doi(query.doi) != cls._normalize_doi(item.doi):
             return False
-        if query.journal and query.journal.lower() not in (item.journal or "").lower():
+        if query.journal and cls._normalize_journal(query.journal) not in cls._normalize_journal(item.journal):
             return False
         if query.citation_key and cls._normalize_citation_key(query.citation_key) != cls._normalize_citation_key(item.citation_key):
             return False
@@ -307,7 +440,12 @@ class LexicalIndex:
         return True
 
     def _search_by_filters_only(self, query: QuerySpec, *, mode_name: str) -> list[SearchHit]:
-        rows = self._conn.execute("SELECT item_json FROM documents ORDER BY item_key").fetchall()
+        filter_where, filter_params = self._structured_filter_sql(query)
+        sql = "SELECT item_json FROM documents"
+        if filter_where:
+            sql += f" WHERE {filter_where}"
+        sql += " ORDER BY item_key"
+        rows = self._conn.execute(sql, tuple(filter_params)).fetchall()
         hits: list[SearchHit] = []
         for row in rows:
             item = Item.model_validate_json(row["item_json"])

@@ -123,7 +123,14 @@ class VectorIndex:
     def _dot(a: list[float], b: list[float]) -> float:
         return sum(x * y for x, y in zip(a, b))
 
-    def search(self, query_vector: list[float], *, limit: int, offset: int = 0) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query_vector: list[float],
+        *,
+        limit: int,
+        offset: int = 0,
+        allowed_item_keys: set[str] | None = None,
+    ) -> list[tuple[str, float]]:
         if not query_vector or limit <= 0:
             return []
 
@@ -145,9 +152,11 @@ class VectorIndex:
         for row in rows:
             if float(row["norm"]) == 0.0:
                 continue
+            item_key = str(row["item_key"])
+            if allowed_item_keys is not None and item_key not in allowed_item_keys:
+                continue
             chunk_vector = json.loads(row["embedding_json"])
             similarity = self._dot(normalized_query, chunk_vector)
-            item_key = str(row["item_key"])
             prev = best_by_item.get(item_key)
             if prev is None or similarity > prev:
                 best_by_item[item_key] = similarity

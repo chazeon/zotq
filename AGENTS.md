@@ -35,6 +35,7 @@ Before implementing behavior-heavy features:
 
 ## Search/Output Contract Notes
 - `search run` supports `--backend [auto|source|index]`; preserve deterministic routing semantics.
+- `search run` supports `--citation-key` with aliases `--citekey` and `--bibkey`.
 - `--output bib` means Zotero `format=bib` (CSL formatted output, often HTML-like).
 - `--output bibtex` means Zotero `format=bibtex` (LaTeX BibTeX entries).
 - `item citekey` supports `--prefer [auto|json|extra|rpc|bibtex]`; keep `auto` fallback order stable.

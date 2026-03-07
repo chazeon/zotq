@@ -192,6 +192,8 @@ uv run zotq --mode local-api --output json search run \
   --citation-key "staceyThermodynamicsGruneisenParameter2019"
 ```
 
+`--bibkey` and `--citekey` are aliases for `--citation-key`.
+
 Search backend selection:
 
 ```bash
@@ -203,6 +205,7 @@ uv run zotq --mode local-api --output json search run "mantle hydration" --backe
 Notes:
 - DOI matching is normalized (`doi:`, `http(s)://doi.org/`, case, surrounding whitespace).
 - Citation-key matching is case-insensitive and also supports keys stored in `extra` as `Citation Key: ...`.
+- Local index search now stores normalized DOI/citation-key/journal columns with SQLite indexes, so structured filters are applied in SQL before ranking.
 
 Resolve citation key:
 

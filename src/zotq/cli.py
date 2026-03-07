@@ -192,7 +192,7 @@ def search_group() -> None:
 @click.option("title", "--title", type=str, default=None)
 @click.option("doi", "--doi", type=str, default=None)
 @click.option("journal", "--journal", type=str, default=None)
-@click.option("citation_key", "--citation-key", type=str, default=None)
+@click.option("citation_key", "--citation-key", "--citekey", "--bibkey", type=str, default=None)
 @click.option("creators", "--creator", type=str, multiple=True)
 @click.option("tags", "--tag", type=str, multiple=True)
 @click.option("collection", "--collection", type=str, default=None)

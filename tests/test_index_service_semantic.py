@@ -113,6 +113,42 @@ def test_hybrid_search_prefers_exact_lexical_match(tmp_path: Path) -> None:
         service.close()
 
 
+def test_semantic_search_applies_structured_filters_before_vector_limit(tmp_path: Path) -> None:
+    service = _build_service(tmp_path)
+    try:
+        items = [
+            Item(
+                key="TARGET",
+                item_type="journalArticle",
+                title="Thermodynamics with the Gruneisen parameter",
+                abstract="Equation of state fundamentals.",
+                doi="10.1016/j.pepi.2018.10.006",
+            ),
+            Item(
+                key="OTHER",
+                item_type="journalArticle",
+                title="Mantle hydration",
+                abstract="Water transport in the mantle wedge.",
+                doi="10.1234/example",
+            ),
+        ]
+        service.sync(full=True, items=items)
+
+        hits = service.search(
+            QuerySpec(
+                text="mantle hydration",
+                search_mode=SearchMode.SEMANTIC,
+                doi="doi:10.1016/j.pepi.2018.10.006",
+                limit=1,
+                offset=0,
+            )
+        )
+
+        assert [hit.item.key for hit in hits] == ["TARGET"]
+    finally:
+        service.close()
+
+
 def test_semantic_downranks_attachments_by_default(tmp_path: Path) -> None:
     service = _build_service(tmp_path)
     try:

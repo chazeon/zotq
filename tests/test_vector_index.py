@@ -51,3 +51,16 @@ def test_vector_index_rejects_dimension_mismatch(tmp_path: Path) -> None:
             index.upsert_item("ITEM-B", [_vector("ITEM-B:0", "ITEM-B", 0, [1.0, 0.0])])
     finally:
         index.close()
+
+
+def test_vector_index_can_filter_allowed_item_keys(tmp_path: Path) -> None:
+    index = VectorIndex(tmp_path / "vector.sqlite3")
+    try:
+        index.upsert_item("ITEM-A", [_vector("ITEM-A:0", "ITEM-A", 0, [1.0, 0.0])])
+        index.upsert_item("ITEM-B", [_vector("ITEM-B:0", "ITEM-B", 0, [0.0, 1.0])])
+
+        hits = index.search(query_vector=[1.0, 0.0], limit=5, allowed_item_keys={"ITEM-B"})
+
+        assert [item_key for item_key, _ in hits] == ["ITEM-B"]
+    finally:
+        index.close()

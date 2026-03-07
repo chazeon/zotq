@@ -214,9 +214,18 @@ class MockIndexService:
         if self._vector.chunk_count() == 0:
             raise IndexNotReadyError("Vector index is not ready.")
 
+        allowed_item_keys = self._lexical.item_keys_for_structured_filters(query)
+        if allowed_item_keys is not None and not allowed_item_keys:
+            return []
+
         query_vector = self._embedding.embed_text(query.text)
         vector_limit = max(query.vector_k or query.limit, query.limit + query.offset)
-        ranked = self._vector.search(query_vector, limit=max(vector_limit, query.limit + query.offset), offset=0)
+        ranked = self._vector.search(
+            query_vector,
+            limit=max(vector_limit, query.limit + query.offset),
+            offset=0,
+            allowed_item_keys=allowed_item_keys,
+        )
 
         scored: list[tuple[float, bool, str, SearchHit]] = []
         for item_key, score in ranked:
@@ -266,6 +275,10 @@ class MockIndexService:
         if self._vector.chunk_count() == 0:
             raise IndexNotReadyError("Vector index is not ready.")
 
+        allowed_item_keys = self._lexical.item_keys_for_structured_filters(query)
+        if allowed_item_keys is not None and not allowed_item_keys:
+            return []
+
         alpha = query.alpha if query.alpha is not None else 0.35
         lexical_limit = max(query.lexical_k or query.limit, query.limit + query.offset)
         vector_limit = max(query.vector_k or query.limit, query.limit + query.offset)
@@ -279,7 +292,7 @@ class MockIndexService:
         lexical_scores = self._normalize_signal_scores(lexical_scores_raw)
 
         query_vector = self._embedding.embed_text(query.text)
-        vector_hits = self._vector.search(query_vector, limit=vector_limit, offset=0)
+        vector_hits = self._vector.search(query_vector, limit=vector_limit, offset=0, allowed_item_keys=allowed_item_keys)
         vector_scores_raw = {item_key: max(0.0, score) for item_key, score in vector_hits}
         vector_scores = self._normalize_signal_scores(vector_scores_raw)
 

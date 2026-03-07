@@ -237,6 +237,30 @@ def test_search_run_accepts_backend_flag() -> None:
 
 
 @respx.mock
+def test_search_run_accepts_bibkey_alias_flag() -> None:
+    respx.get("http://remote.test/users/0/items").mock(return_value=Response(200, json=[]))
+
+    runner = CliRunner()
+    result = invoke_remote(
+        runner,
+        [
+            "--output",
+            "json",
+            "search",
+            "run",
+            "--bibkey",
+            "staceyThermodynamicsGruneisenParameter2019",
+            "--limit",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["query"]["citation_key"] == "staceyThermodynamicsGruneisenParameter2019"
+
+
+@respx.mock
 def test_item_citekey_returns_citation_key() -> None:
     respx.get("http://remote.test/users/0/items/XVMVWQZX").mock(
         return_value=Response(

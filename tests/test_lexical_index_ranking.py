@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 from zotq.models import ChunkRecord, Item, QuerySpec, SearchMode
 from zotq.storage import LexicalIndex
@@ -149,5 +150,79 @@ def test_keyword_filter_only_path_supports_doi_journal_and_citation_key(tmp_path
         )
 
         assert [hit.item.key for hit in hits] == ["TARGET"]
+    finally:
+        index.close()
+
+
+def test_legacy_schema_migration_backfills_structured_norm_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "lexical.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE documents (
+                item_key TEXT PRIMARY KEY,
+                item_json TEXT NOT NULL,
+                title TEXT,
+                item_type TEXT,
+                date TEXT,
+                creators TEXT,
+                tags TEXT,
+                full_text TEXT
+            );
+            CREATE TABLE chunks (
+                chunk_id TEXT PRIMARY KEY,
+                item_key TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                text TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                chunk_id UNINDEXED,
+                item_key UNINDEXED,
+                text,
+                tokenize='unicode61'
+            );
+            """
+        )
+        item = Item(
+            key="LEGACY",
+            item_type="journalArticle",
+            title="Thermodynamics with the Gruneisen parameter",
+            doi="10.1016/j.pepi.2018.10.006",
+            journal="Physics of the Earth and Planetary Interiors",
+            citation_key="staceyThermodynamicsGruneisenParameter2019",
+        )
+        conn.execute(
+            """
+            INSERT INTO documents(item_key, item_json, title, item_type, date, creators, tags, full_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item.key,
+                item.model_dump_json(),
+                item.title,
+                item.item_type,
+                item.date,
+                "",
+                "",
+                "thermodynamics gruneisen",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    index = LexicalIndex(db_path)
+    try:
+        hits = index.search_keyword(
+            QuerySpec(
+                search_mode=SearchMode.KEYWORD,
+                doi="doi:10.1016/j.pepi.2018.10.006",
+                citation_key="staceythermodynamicsgruneisenparameter2019",
+                journal="planetary interiors",
+                limit=5,
+            )
+        )
+        assert [hit.item.key for hit in hits] == ["LEGACY"]
     finally:
         index.close()
