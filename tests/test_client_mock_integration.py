@@ -124,6 +124,37 @@ def test_index_lifecycle_updates_status() -> None:
     assert rebuilt.chunk_count == 4
 
 
+def test_client_close_closes_source_and_index_services() -> None:
+    class _ClosableSource:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def close(self) -> None:
+            self.closed += 1
+
+    class _ClosableIndex:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def close(self) -> None:
+            self.closed += 1
+
+    config = AppConfig()
+    source = _ClosableSource()
+    index = _ClosableIndex()
+    client = ZotQueryClient(
+        config=config,
+        profile_name="default",
+        source_adapter=source,  # type: ignore[arg-type]
+        index_service=index,  # type: ignore[arg-type]
+    )
+
+    client.close()
+
+    assert source.closed == 1
+    assert index.closed == 1
+
+
 def test_index_sync_collect_resumes_after_collection_interruption() -> None:
     class _FlakyCollectSource(MockSourceAdapter):
         def __init__(self) -> None:

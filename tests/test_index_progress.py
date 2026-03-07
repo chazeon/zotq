@@ -59,4 +59,7 @@ def test_client_index_sync_reports_collect_and_index_progress() -> None:
     assert collect_events[-1] == ("collect", 4, 4)
     enrich_events = [event for event in events if event[0] == "enrich"]
     assert enrich_events
+    assert enrich_events[0][1] == 0
+    assert enrich_events[-1][2] is not None
+    assert enrich_events[-1][1] == enrich_events[-1][2]
     assert events[-1][0] == "enrich"

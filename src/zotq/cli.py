@@ -183,6 +183,7 @@ def main(ctx: click.Context, config_path: str | None, profile: str | None, mode:
         search_defaults=selected_profile.search,
         verbose=verbose,
     )
+    ctx.call_on_close(client.close)
 
 
 @main.group("system")

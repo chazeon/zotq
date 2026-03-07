@@ -263,14 +263,28 @@ class ZotQueryClient:
         if total_missing == 0:
             return {"missing": 0, "updated": 0, "remaining": 0}
 
-        resolved = self._resolve_citation_keys_for_item_keys(missing, progress=progress)
+        total_work = max(1, total_missing * 2)
+        if progress is not None:
+            progress("enrich", 0, total_work)
+
+        resolve_progress: ProgressCallback | None = None
+        if progress is not None:
+
+            def resolve_progress(_: str, current: int, __: int | None) -> None:
+                progress("enrich", min(current, total_missing), total_work)
+
+        resolved = self._resolve_citation_keys_for_item_keys(missing, progress=resolve_progress)
         updated = 0
-        for item_key in missing:
+        for index, item_key in enumerate(missing, start=1):
             citation_key = resolved.get(item_key)
             if not citation_key:
+                if progress is not None:
+                    progress("enrich", total_missing + index, total_work)
                 continue
             if self._index.set_item_citation_key(item_key, citation_key):
                 updated += 1
+            if progress is not None:
+                progress("enrich", total_missing + index, total_work)
 
         remaining = max(0, total_missing - updated)
         return {"missing": total_missing, "updated": updated, "remaining": remaining}
@@ -703,3 +717,11 @@ class ZotQueryClient:
         if callable(clear_collect):
             clear_collect()
         return status
+
+    def close(self) -> None:
+        close_source = getattr(self._source, "close", None)
+        if callable(close_source):
+            close_source()
+        close_index = getattr(self._index, "close", None)
+        if callable(close_index):
+            close_index()
