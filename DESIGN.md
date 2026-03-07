@@ -418,6 +418,31 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - Implementation status:
   - Implemented in current v1 surface and covered by tests/docs.
 
+### 6.10 Batched Multi-Key Requests (Planned)
+- Goal:
+  - Reduce round trips and latency for repeated read operations while keeping command grammar stable.
+- Compatibility constraints:
+  - Keep existing single-key forms unchanged:
+    - `zotq item get KEY`
+    - `zotq item citekey KEY [--prefer auto|json|extra|rpc|bibtex]`
+  - Additive multi-key form should be option-based (repeatable `--key`) rather than a new command resource/verb.
+- Proposed command shape:
+  - `zotq item get --key K1 --key K2 ...`
+  - `zotq item citekey --key K1 --key K2 ... [--prefer ...]`
+- Output contract:
+  - `--output json`: list of per-key result objects in input order.
+  - `--output jsonl`: one per-key result object per line.
+  - `--output table`: multi-row table with `key`, `found/status`, and core fields.
+  - Partial failures must be explicit per key (do not fail whole response when only some keys fail).
+- Transport strategy:
+  - Prefer source batch endpoints (`itemKey=K1,K2,...`) where available.
+  - Fallback to per-key adapter calls when batch endpoints are unavailable.
+- Testing requirements (test-first):
+  - Backward compatibility for single-key forms.
+  - Deterministic output order matching input key order.
+  - Partial-failure behavior and timeout/error propagation.
+  - Batch-path vs fallback-path coverage for both `local-api` and `remote`.
+
 ## 7. Object and Data Models (Pydantic)
 
 ### 7.1 Config Models
@@ -453,6 +478,7 @@ QuerySpec(
   tags: list[str],
   collection: str | None,
   item_type: str | None,
+  include_attachments: bool,
   alpha: float | None,
   lexical_k: int | None,
   vector_k: int | None,
@@ -673,6 +699,9 @@ src/zotq/
 3. Improve source checkpointing fidelity:
    - Source watermark/checkpoint support is now available where adapters provide paging tokens.
    - Restart logic now tolerates source-order drift via collected-key dedupe + resume checkpoints.
-4. Post-v1 feature roadmap:
+4. Add batched multi-key read UX for item operations:
+   - Introduce repeatable `--key` support for `item get` and `item citekey` while preserving current single-key forms.
+   - Use batch transport where available and fallback loops otherwise, with deterministic per-key output/error reporting.
+5. Post-v1 feature roadmap:
    - Introduce low-risk mutation commands (`collection add-item/remove-item`, `tag add/remove`) with `--dry-run`/`--yes`.
    - Keep MCP integration as separate phase after CLI contracts stabilize.
