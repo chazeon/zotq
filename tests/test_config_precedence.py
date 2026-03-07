@@ -6,7 +6,7 @@ import pytest
 
 from zotq.config import apply_cli_overrides, load_app_config
 from zotq.errors import ConfigError
-from zotq.models import Mode, OutputFormat, SearchMode
+from zotq.models import Mode, OutputFormat, SearchMode, VectorBackend
 
 
 def write_config(path: Path) -> None:
@@ -27,6 +27,7 @@ enabled = true
 index_dir = "~/.cache/zotq/index-file"
 lexical_profile_version = 1
 vector_profile_version = 1
+vector_backend = "sqlite-vec"
 embedding_provider = "local"
 embedding_model = "local-hash-v1"
 embedding_base_url = ""
@@ -46,6 +47,7 @@ def test_load_defaults_when_no_file(tmp_path: Path) -> None:
     assert profile.mode == Mode.LOCAL_API
     assert profile.output == OutputFormat.TABLE
     assert profile.search.default_mode == SearchMode.KEYWORD
+    assert profile.index.vector_backend == VectorBackend.PYTHON
 
 
 def test_env_overrides_file(tmp_path: Path) -> None:
@@ -61,6 +63,7 @@ def test_env_overrides_file(tmp_path: Path) -> None:
         "ZOTQ_EMBEDDING_MODEL": "nomic-embed-text",
         "ZOTQ_LEXICAL_PROFILE_VERSION": "3",
         "ZOTQ_VECTOR_PROFILE_VERSION": "4",
+        "ZOTQ_VECTOR_BACKEND": "python",
         "ZOTQ_EMBEDDING_BASE_URL": "http://127.0.0.1:11434",
         "ZOTQ_EMBEDDING_TIMEOUT_SECONDS": "55",
         "ZOTQ_EMBEDDING_MAX_RETRIES": "4",
@@ -77,6 +80,7 @@ def test_env_overrides_file(tmp_path: Path) -> None:
     assert profile.index.embedding_model == "nomic-embed-text"
     assert profile.index.lexical_profile_version == 3
     assert profile.index.vector_profile_version == 4
+    assert profile.index.vector_backend == VectorBackend.PYTHON
     assert profile.index.embedding_base_url == "http://127.0.0.1:11434"
     assert profile.index.embedding_timeout_seconds == 55
     assert profile.index.embedding_max_retries == 4

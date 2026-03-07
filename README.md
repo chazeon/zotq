@@ -62,6 +62,7 @@ enabled = true
 index_dir = "~/.local/share/zotq/index"
 lexical_profile_version = 1
 vector_profile_version = 1
+vector_backend = "python" # or "sqlite-vec"
 embedding_provider = "local"
 embedding_model = "local-hash-v1"
 embedding_base_url = ""
@@ -91,6 +92,7 @@ Useful vars:
 - `ZOTQ_INDEX_DIR`
 - `ZOTQ_LEXICAL_PROFILE_VERSION`
 - `ZOTQ_VECTOR_PROFILE_VERSION`
+- `ZOTQ_VECTOR_BACKEND`
 - `ZOTQ_EMBEDDING_PROVIDER`
 - `ZOTQ_EMBEDDING_MODEL`
 - `ZOTQ_EMBEDDING_BASE_URL`

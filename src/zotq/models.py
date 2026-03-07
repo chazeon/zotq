@@ -36,6 +36,11 @@ class SearchBackend(str, Enum):
     INDEX = "index"
 
 
+class VectorBackend(str, Enum):
+    PYTHON = "python"
+    SQLITE_VEC = "sqlite-vec"
+
+
 class Creator(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -131,6 +136,57 @@ class SearchResult(BaseModel):
     hits: list[SearchHit] = Field(default_factory=list)
 
 
+class MultiKeyResultStatus(str, Enum):
+    OK = "ok"
+    NOT_FOUND = "not_found"
+    ERROR = "error"
+
+
+class MultiKeyTransportTelemetry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    batch_used: bool = False
+    fallback_loop: bool = False
+
+
+class ItemGetPerKeyResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    found: bool
+    status: MultiKeyResultStatus = MultiKeyResultStatus.OK
+    item: Item | None = None
+    error: str | None = None
+
+
+class ItemGetMultiKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    command: Literal["item get"] = "item get"
+    transport: MultiKeyTransportTelemetry = Field(default_factory=MultiKeyTransportTelemetry)
+    results: list[ItemGetPerKeyResult] = Field(default_factory=list)
+
+
+class ItemCiteKeyPerKeyResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    key: str
+    found: bool
+    status: MultiKeyResultStatus = MultiKeyResultStatus.OK
+    citation_key: str | None = None
+    source: str | None = None
+    prefer: Literal["auto", "json", "extra", "rpc", "bibtex"] = "auto"
+    error: str | None = None
+
+
+class ItemCiteKeyMultiKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    command: Literal["item citekey"] = "item citekey"
+    transport: MultiKeyTransportTelemetry = Field(default_factory=MultiKeyTransportTelemetry)
+    results: list[ItemCiteKeyPerKeyResult] = Field(default_factory=list)
+
+
 class ChunkRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -166,6 +222,7 @@ class IndexConfig(BaseModel):
     index_dir: str = "~/.local/share/zotq/index"
     lexical_profile_version: int = Field(default=1, ge=1)
     vector_profile_version: int = Field(default=1, ge=1)
+    vector_backend: VectorBackend = VectorBackend.PYTHON
     embedding_provider: str = "local"
     embedding_model: str = ""
     embedding_base_url: str = ""

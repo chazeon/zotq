@@ -6,16 +6,16 @@ Status values: `todo`, `in_progress`, `done`.
 
 - [x] `S0` (`done`) Baseline docs commit (`d88c964`) for DESIGN/TODO runbook.
 - [x] `S1` (`done`) Dependency bootstrap (`sqlite-vec` + BibTeX parser) and smoke coverage.
-- [ ] `S2` (`in_progress`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
-- [ ] `S3` (`todo`) Execute P0 benchmark harness (`T0.3`) with tests first.
+- [x] `S2` (`done`) Execute P0 contracts (`T0.1`, `T0.2`) with tests first.
+- [ ] `S3` (`in_progress`) Execute P0 benchmark harness (`T0.3`) with tests first.
 
 ## P0 Contracts and Benchmarks
 
-- [ ] `T0.1` (`todo`) Add multi-key output contract models and docs.
+- [x] `T0.1` (`done`) Add multi-key output contract models and docs.
   - Files: `src/zotq/models.py`, `src/zotq/contracts.py`, `DESIGN.md`.
   - Tests: `tests/test_cli_contract_model.py`.
 
-- [ ] `T0.2` (`todo`) Add vector backend selector contract (`python|sqlite-vec`).
+- [x] `T0.2` (`done`) Add vector backend selector contract (`python|sqlite-vec`).
   - Files: `src/zotq/models.py`, `src/zotq/config.py`, `README.md`, `DESIGN.md`.
   - Tests: `tests/test_config_precedence.py`.
 

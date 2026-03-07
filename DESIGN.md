@@ -444,6 +444,11 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - `--output jsonl`: one per-key result object per line.
   - `--output table`: multi-row table with `key`, `found/status`, and core fields.
   - Partial failures must be explicit per key (do not fail whole response when only some keys fail).
+  - `status` enum: `ok|not_found|error`.
+  - Transport telemetry fields: `batch_used`, `fallback_loop`.
+  - Contract model targets:
+    - `item get` -> `ItemGetMultiKeyResponse` (`results: ItemGetPerKeyResult[]`)
+    - `item citekey` -> `ItemCiteKeyMultiKeyResponse` (`results: ItemCiteKeyPerKeyResult[]`)
 - Transport strategy:
   - Prefer source batch endpoints (`itemKey=K1,K2,...`) where available.
   - Fallback to per-key adapter calls when batch endpoints are unavailable.
@@ -471,6 +476,10 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
 - `IndexStatus`
 - `ChunkRecord`
 - `SearchHit`, `SearchResult`
+- Multi-key output contracts:
+  - `MultiKeyResultStatus`, `MultiKeyTransportTelemetry`
+  - `ItemGetPerKeyResult`, `ItemGetMultiKeyResponse`
+  - `ItemCiteKeyPerKeyResult`, `ItemCiteKeyMultiKeyResponse`
 
 ### 7.3 QuerySpec (normalized)
 ```python
@@ -524,6 +533,7 @@ vector_k = 100
 [profiles.default.index]
 enabled = true
 index_dir = "~/.local/share/zotq/index"
+vector_backend = "python" # or "sqlite-vec"
 embedding_provider = "local"
 embedding_model = "local-hash-v1"
 embedding_base_url = ""
@@ -566,6 +576,7 @@ verify_tls = true
 - `ZOTQ_INDEX_DIR`
 - `ZOTQ_LEXICAL_PROFILE_VERSION`
 - `ZOTQ_VECTOR_PROFILE_VERSION`
+- `ZOTQ_VECTOR_BACKEND`
 - `ZOTQ_EMBEDDING_PROVIDER`
 - `ZOTQ_EMBEDDING_MODEL`
 - `ZOTQ_EMBEDDING_BASE_URL`

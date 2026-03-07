@@ -29,12 +29,26 @@ class CliApiContract(BaseModel):
     global_options: list[str] = Field(default_factory=list)
     commands: list[CommandSpec] = Field(default_factory=list)
     reserved_commands: list[CommandSpec] = Field(default_factory=list)
+    planned_output_contracts: list["PlannedOutputContract"] = Field(default_factory=list)
 
     def command_names(self) -> set[str]:
         return {spec.name for spec in self.commands}
 
     def reserved_names(self) -> set[str]:
         return {spec.name for spec in self.reserved_commands}
+
+
+class PlannedOutputContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: str
+    cli_form: str
+    json_model: str
+    jsonl_model: str
+    table_columns: list[str] = Field(default_factory=list)
+    telemetry_fields: list[str] = Field(default_factory=list)
+    partial_failures_are_per_key: bool = True
+    preserves_input_order: bool = True
 
 
 V1_COMMANDS: list[CommandSpec] = [
@@ -89,4 +103,22 @@ def build_cli_api_contract() -> CliApiContract:
         ],
         commands=V1_COMMANDS,
         reserved_commands=RESERVED_WRITE_COMMANDS,
+        planned_output_contracts=[
+            PlannedOutputContract(
+                command="item get",
+                cli_form="zotq item get --key K1 --key K2 ...",
+                json_model="ItemGetMultiKeyResponse",
+                jsonl_model="ItemGetPerKeyResult",
+                table_columns=["key", "status", "found", "title", "item_type", "doi", "journal"],
+                telemetry_fields=["batch_used", "fallback_loop"],
+            ),
+            PlannedOutputContract(
+                command="item citekey",
+                cli_form="zotq item citekey --key K1 --key K2 ... [--prefer ...]",
+                json_model="ItemCiteKeyMultiKeyResponse",
+                jsonl_model="ItemCiteKeyPerKeyResult",
+                table_columns=["key", "status", "found", "citation_key", "source", "prefer"],
+                telemetry_fields=["batch_used", "fallback_loop"],
+            ),
+        ],
     )
