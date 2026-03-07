@@ -185,8 +185,8 @@ class ZotQueryClient:
 
         return resolved
 
-    def index_enrich_citation_keys(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
-        missing = self._index.list_items_missing_citation_key()
+    def _enrich_field_citation_key(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
+        missing = self._index.list_items_missing_field("citation_key")
         total_missing = len(missing)
         if total_missing == 0:
             return {"missing": 0, "updated": 0, "remaining": 0}
@@ -202,6 +202,84 @@ class ZotQueryClient:
 
         remaining = max(0, total_missing - updated)
         return {"missing": total_missing, "updated": updated, "remaining": remaining}
+
+    def _enrich_field_from_source_metadata(
+        self,
+        field: str,
+        *,
+        progress: ProgressCallback | None = None,
+        page_size: int = 100,
+    ) -> dict[str, int]:
+        if field not in {"doi", "journal"}:
+            raise ValueError(f"Unsupported metadata enrichment field: {field}")
+
+        missing_keys = self._index.list_items_missing_field(field)
+        total_missing = len(missing_keys)
+        if total_missing == 0:
+            return {"missing": 0, "updated": 0, "remaining": 0}
+
+        remaining_keys = set(missing_keys)
+        updated = 0
+        offset = 0
+
+        while remaining_keys:
+            page = self._source.list_items(limit=page_size, offset=offset)
+            if not page:
+                break
+
+            for item in page:
+                if item.key not in remaining_keys:
+                    continue
+                remaining_keys.remove(item.key)
+                if field == "doi":
+                    value = item.doi
+                    did_update = self._index.set_item_structured_fields(item.key, doi=value) if value else False
+                else:
+                    value = item.journal
+                    did_update = self._index.set_item_structured_fields(item.key, journal=value) if value else False
+                if did_update:
+                    updated += 1
+                if progress is not None:
+                    progress("enrich", total_missing - len(remaining_keys), total_missing)
+
+            if len(page) < page_size:
+                break
+            offset += len(page)
+
+        if progress is not None and total_missing > 0:
+            progress("enrich", total_missing - len(remaining_keys), total_missing)
+
+        remaining = max(0, total_missing - updated)
+        return {"missing": total_missing, "updated": updated, "remaining": remaining}
+
+    @staticmethod
+    def _normalize_enrich_field(field: str) -> str:
+        normalized = field.strip().lower().replace("_", "-")
+        if normalized in {"citationkey", "citation-key"}:
+            return "citation-key"
+        if normalized in {"doi", "journal", "all"}:
+            return normalized
+        raise ValueError(f"Unsupported enrich field: {field}")
+
+    def index_enrich(self, *, field: str = "citation-key", progress: ProgressCallback | None = None) -> dict[str, dict[str, int]]:
+        selected = self._normalize_enrich_field(field)
+        if selected == "all":
+            field_order = ["citation-key", "doi", "journal"]
+        else:
+            field_order = [selected]
+
+        results: dict[str, dict[str, int]] = {}
+        for name in field_order:
+            if name == "citation-key":
+                results[name] = self._enrich_field_citation_key(progress=progress)
+            elif name == "doi":
+                results[name] = self._enrich_field_from_source_metadata("doi", progress=progress)
+            elif name == "journal":
+                results[name] = self._enrich_field_from_source_metadata("journal", progress=progress)
+        return results
+
+    def index_enrich_citation_keys(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
+        return self._enrich_field_citation_key(progress=progress)
 
     def get_item_citation_key(self, key: str, *, prefer: str = "auto") -> dict[str, str | bool | None]:
         prefer_mode = prefer.strip().lower()

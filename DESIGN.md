@@ -285,6 +285,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `zotq index inspect`
 - `zotq index sync [--full]`
 - `zotq index rebuild`
+- `zotq index enrich [--field citation-key|doi|journal|all]`
 
 ### 6.4 Search Options (`search run`)
 - `QUERY` positional argument (preferred)
@@ -325,7 +326,8 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
 - `index rebuild`
   - Drops and rebuilds local indexes from source.
 - `index enrich`
-  - Metadata-only enrichment pass (for example citation keys) without full lexical/vector rebuild.
+  - Metadata-only enrichment pass without full lexical/vector rebuild.
+  - Supports targeted fields (`citation-key`, `doi`, `journal`) or `all`.
 
 ### 6.6 Reserved Verb Space (Post-v1)
 Keep these verbs reserved now so future write features fit without CLI breakage:
@@ -362,6 +364,29 @@ Keep these verbs reserved now so future write features fit without CLI breakage:
   - `local-api`: typically no API key required when local API access is enabled in Zotero Desktop.
   - `remote`: API key or bearer token required for non-public libraries.
 - `zotq` should treat "zotbib-like" output as Zotero API bibliography formatting support (not dependency on a separate ZoteroBib backend service).
+
+### 6.9 Proposed Extension: Collection BibTeX Export
+This is a read-only candidate command for the next contract revision (not part of the locked v1 command list yet).
+
+- Command shape:
+  - `zotq collection export KEY [options]`
+- Initial option contract:
+  - `--format bibtex` (required in first release of this command; future formats can be added later)
+  - `--include-children/--no-include-children` (default `--no-include-children`)
+  - `--batch-size` (default `200`, max `500`) for batched `itemKey=...` bibliography fetches
+- Output contract:
+  - `--output bibtex`: writes concatenated BibTeX entries to stdout.
+  - `--style/--locale/--linkwrap` are invalid for this command (same rule as `--output bibtex` elsewhere).
+- Deterministic routing rule:
+  - Export should execute against source API pagination, not index ranking, to guarantee complete collection membership export.
+- Collection identity rule:
+  - `KEY` is a collection key (stable identifier), not a display name.
+
+Gaps to close before implementation:
+- CLI/API contract gap: no `collection export` verb is modeled in contract definitions/tests today.
+- Pagination gap: existing `search run --collection ... --output bibtex` is query-limit based (`QuerySpec.limit`, max 500), so it cannot represent unbounded full export.
+- Traversal gap: no explicit policy for child/subcollection inclusion.
+- Verification gap: no tests currently assert complete collection export semantics across page boundaries and batch BibTeX fetch behavior.
 
 ## 7. Object and Data Models (Pydantic)
 

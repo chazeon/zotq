@@ -235,18 +235,19 @@ class LexicalIndex:
             raise ValueError(f"Unsupported field for structured inspection: {field}")
         return column
 
-    def list_item_keys_missing_field(self, field: str, *, limit: int = 5) -> list[str]:
+    def list_item_keys_missing_field(self, field: str, *, limit: int | None = None) -> list[str]:
         column = self._norm_column_for_field(field)
-        rows = self._conn.execute(
-            f"""
+        sql = f"""
             SELECT item_key
             FROM documents
             WHERE {column} IS NULL OR {column} = ''
             ORDER BY item_key
-            LIMIT ?
-            """,
-            (max(0, limit),),
-        ).fetchall()
+        """
+        params: tuple[object, ...] = ()
+        if limit is not None:
+            sql += "\nLIMIT ?"
+            params = (max(0, limit),)
+        rows = self._conn.execute(sql, params).fetchall()
         return [str(row["item_key"]) for row in rows]
 
     def count_missing_field(self, field: str) -> int:
@@ -278,24 +279,58 @@ class LexicalIndex:
         }
 
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
-        clean = citation_key.strip()
-        if not clean:
-            return False
+        return self.set_item_structured_fields(item_key, citation_key=citation_key)
 
+    def set_item_structured_fields(
+        self,
+        item_key: str,
+        *,
+        doi: str | None = None,
+        citation_key: str | None = None,
+        journal: str | None = None,
+    ) -> bool:
         row = self._conn.execute("SELECT item_json FROM documents WHERE item_key = ?", (item_key,)).fetchone()
         if row is None:
             return False
 
         item = Item.model_validate_json(str(row["item_json"]))
-        item.citation_key = clean
+        changed = False
+
+        if doi is not None:
+            clean_doi = doi.strip()
+            if clean_doi and clean_doi != (item.doi or ""):
+                item.doi = clean_doi
+                changed = True
+
+        if citation_key is not None:
+            clean_citation_key = citation_key.strip()
+            if clean_citation_key and clean_citation_key != (item.citation_key or ""):
+                item.citation_key = clean_citation_key
+                changed = True
+
+        if journal is not None:
+            clean_journal = journal.strip()
+            if clean_journal and clean_journal != (item.journal or ""):
+                item.journal = clean_journal
+                changed = True
+
+        if not changed:
+            return False
+
         with self._conn:
             self._conn.execute(
                 """
                 UPDATE documents
-                SET item_json = ?, citation_key_norm = ?
+                SET item_json = ?, doi_norm = ?, citation_key_norm = ?, journal_norm = ?
                 WHERE item_key = ?
                 """,
-                (item.model_dump_json(), self._normalize_citation_key(clean), item_key),
+                (
+                    item.model_dump_json(),
+                    self._normalize_doi(item.doi),
+                    self._normalize_citation_key(item.citation_key),
+                    self._normalize_journal(item.journal),
+                    item_key,
+                ),
             )
         return True
 

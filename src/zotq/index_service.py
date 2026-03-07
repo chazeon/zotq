@@ -139,8 +139,26 @@ class MockIndexService:
     def list_items_missing_citation_key(self) -> list[str]:
         return self._lexical.list_item_keys_missing_citation_key()
 
+    def list_items_missing_field(self, field: str) -> list[str]:
+        return self._lexical.list_item_keys_missing_field(field)
+
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
         return self._lexical.set_item_citation_key(item_key, citation_key)
+
+    def set_item_structured_fields(
+        self,
+        item_key: str,
+        *,
+        doi: str | None = None,
+        citation_key: str | None = None,
+        journal: str | None = None,
+    ) -> bool:
+        return self._lexical.set_item_structured_fields(
+            item_key,
+            doi=doi,
+            citation_key=citation_key,
+            journal=journal,
+        )
 
     def inspect_index(self, *, sample_limit: int = 5) -> dict[str, object]:
         lexical = self._lexical.inspect_structured_fields(sample_limit=sample_limit)

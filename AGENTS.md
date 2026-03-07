@@ -33,7 +33,7 @@ Before implementing behavior-heavy features:
 - `zotq index inspect`
 - `zotq index sync [--full]`
 - `zotq index rebuild`
-- `zotq index enrich`
+- `zotq index enrich [--field citation-key|doi|journal|all]`
 
 ## Search/Output Contract Notes
 - `search run` supports `--backend [auto|source|index]`; preserve deterministic routing semantics.

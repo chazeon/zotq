@@ -94,7 +94,7 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
     ) as progress:
         collect_task = progress.add_task("Collecting items", total=None)
         index_task = progress.add_task("Indexing items", total=1, completed=0, visible=False)
-        enrich_task = progress.add_task("Enriching citation keys", total=1, completed=0, visible=False)
+        enrich_task = progress.add_task("Enriching metadata", total=1, completed=0, visible=False)
         index_started = False
         enrich_started = False
 
@@ -144,7 +144,7 @@ def _run_with_index_progress(runtime: RuntimeContext, action: str, fn):
         if index_started:
             progress.update(index_task, description=f"{action.capitalize()} index (done)")
         if enrich_started:
-            progress.update(enrich_task, description="Enriching citation keys (done)")
+            progress.update(enrich_task, description="Enriching metadata (done)")
         return status
 
 
@@ -452,21 +452,29 @@ def index_rebuild(runtime: RuntimeContext, show_progress: bool) -> None:
 
 
 @index_group.command("enrich")
+@click.option(
+    "field",
+    "--field",
+    type=click.Choice(["citation-key", "doi", "journal", "all"], case_sensitive=False),
+    default="citation-key",
+    show_default=True,
+    help="Field(s) to enrich in-place.",
+)
 @click.option("show_progress", "--progress/--no-progress", default=True, help="Show progress in table output.")
 @pass_runtime
-def index_enrich(runtime: RuntimeContext, show_progress: bool) -> None:
+def index_enrich(runtime: RuntimeContext, field: str, show_progress: bool) -> None:
     try:
         if show_progress:
             result = _run_with_index_progress(
                 runtime,
                 "enrich",
-                lambda progress: runtime.client.index_enrich_citation_keys(progress=progress),
+                lambda progress: runtime.client.index_enrich(field=field, progress=progress),
             )
         else:
-            result = runtime.client.index_enrich_citation_keys()
-    except (BackendConnectionError, IndexNotReadyError) as exc:
+            result = runtime.client.index_enrich(field=field)
+    except (BackendConnectionError, IndexNotReadyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    payload = {"action": "enrich", "citation_keys": result}
+    payload = {"action": "enrich", "field": field, "results": result}
     click.echo(render_payload(payload, runtime.output))
 
 

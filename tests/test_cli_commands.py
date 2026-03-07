@@ -547,9 +547,23 @@ def test_index_enrich_returns_counts_when_index_empty() -> None:
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["action"] == "enrich"
-    assert payload["citation_keys"]["missing"] == 0
-    assert payload["citation_keys"]["updated"] == 0
-    assert payload["citation_keys"]["remaining"] == 0
+    assert payload["field"] == "citation-key"
+    assert payload["results"]["citation-key"]["missing"] == 0
+    assert payload["results"]["citation-key"]["updated"] == 0
+    assert payload["results"]["citation-key"]["remaining"] == 0
+
+
+def test_index_enrich_all_fields_when_index_empty() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "index", "enrich", "--field", "all", "--no-progress"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["action"] == "enrich"
+    assert payload["field"] == "all"
+    assert payload["results"]["citation-key"]["missing"] == 0
+    assert payload["results"]["doi"]["missing"] == 0
+    assert payload["results"]["journal"]["missing"] == 0
 
 
 def test_index_inspect_returns_field_coverage_summary() -> None:

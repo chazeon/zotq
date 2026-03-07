@@ -108,3 +108,51 @@ def test_index_sync_enriches_citation_key_from_bibtex_batch_fallback() -> None:
     result = client.search(QuerySpec(search_mode=SearchMode.KEYWORD, citation_key="betakey", limit=5))
 
     assert [hit.item.key for hit in result.hits] == ["K2"]
+
+
+def test_index_enrich_doi_updates_missing_doi_in_place() -> None:
+    items = [Item(key="K1", title="Doc One"), Item(key="K2", title="Doc Two")]
+    source = _EnrichmentSourceStub(items=items, rpc={})
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+
+    # Source metadata improves later; avoid expensive full sync and run targeted enrich.
+    source._items[0].doi = "10.1000/xyz"
+    result = client.index_enrich(field="doi")
+    hits = client.search(QuerySpec(search_mode=SearchMode.KEYWORD, doi="doi:10.1000/xyz", limit=5))
+
+    assert result["doi"]["updated"] >= 1
+    assert [hit.item.key for hit in hits.hits] == ["K1"]
+
+
+def test_index_enrich_journal_updates_missing_journal_in_place() -> None:
+    items = [Item(key="K1", title="Doc One"), Item(key="K2", title="Doc Two")]
+    source = _EnrichmentSourceStub(items=items, rpc={})
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+
+    source._items[1].journal = "Geophysical Journal International"
+    result = client.index_enrich(field="journal")
+    hits = client.search(QuerySpec(search_mode=SearchMode.KEYWORD, journal="geophysical journal", limit=5))
+
+    assert result["journal"]["updated"] >= 1
+    assert [hit.item.key for hit in hits.hits] == ["K2"]
+
+
+def test_index_enrich_doi_reports_all_missing_not_capped_to_sample_size() -> None:
+    items = [Item(key=f"K{i}", title=f"Doc {i}") for i in range(7)]
+    source = _EnrichmentSourceStub(items=items, rpc={})
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+    # Source now exposes DOI for all records.
+    for i, item in enumerate(source._items, start=1):
+        item.doi = f"10.1000/test{i}"
+
+    result = client.index_enrich(field="doi")
+
+    assert result["doi"]["missing"] == 7
+    assert result["doi"]["updated"] == 7
+    assert result["doi"]["remaining"] == 0

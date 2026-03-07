@@ -48,7 +48,12 @@ V1_COMMANDS: list[CommandSpec] = [
     CommandSpec(resource="index", verb="inspect", usage="zotq index inspect", summary="Inspect index field coverage"),
     CommandSpec(resource="index", verb="sync", usage="zotq index sync [--full]", summary="Sync index incrementally or full"),
     CommandSpec(resource="index", verb="rebuild", usage="zotq index rebuild", summary="Rebuild index from source"),
-    CommandSpec(resource="index", verb="enrich", usage="zotq index enrich", summary="Enrich index metadata in place"),
+    CommandSpec(
+        resource="index",
+        verb="enrich",
+        usage="zotq index enrich [--field citation-key|doi|journal|all]",
+        summary="Enrich index metadata in place",
+    ),
 ]
 
 
