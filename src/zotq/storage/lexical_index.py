@@ -611,7 +611,48 @@ class LexicalIndex:
         ).fetchone()
         return int(row["c"]) if row else 0
 
-    def inspect_structured_fields(self, *, sample_limit: int = 5) -> dict[str, object]:
+    def count_profile_version_mismatches(self, column: str, target_version: int) -> int:
+        if column not in {"lexical_profile_version", "vector_profile_version"}:
+            raise ValueError(f"Unsupported profile version column: {column}")
+        row = self._conn.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM documents
+            WHERE {column} IS NULL OR {column} != ?
+            """,
+            (int(target_version),),
+        ).fetchone()
+        return int(row["c"]) if row else 0
+
+    def list_item_keys_with_profile_mismatch(
+        self,
+        column: str,
+        target_version: int,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        if column not in {"lexical_profile_version", "vector_profile_version"}:
+            raise ValueError(f"Unsupported profile version column: {column}")
+        sql = f"""
+            SELECT item_key
+            FROM documents
+            WHERE {column} IS NULL OR {column} != ?
+            ORDER BY item_key
+        """
+        params_list: list[object] = [int(target_version)]
+        if limit is not None:
+            sql += "\nLIMIT ?"
+            params_list.append(max(0, limit))
+        rows = self._conn.execute(sql, tuple(params_list)).fetchall()
+        return [str(row["item_key"]) for row in rows]
+
+    def inspect_structured_fields(
+        self,
+        *,
+        sample_limit: int = 5,
+        lexical_profile_version: int | None = None,
+        vector_profile_version: int | None = None,
+    ) -> dict[str, object]:
         doc_count = self.document_count()
         fields = list(self._structured_field_names())
         details: dict[str, object] = {}
@@ -623,11 +664,39 @@ class LexicalIndex:
                 "present": present,
                 "sample_missing_item_keys": self.list_item_keys_missing_field(field, limit=sample_limit),
             }
-        return {
+        summary: dict[str, object] = {
             "documents": doc_count,
             "storage": "item_fields_v2",
             "fields": details,
         }
+        profiles: dict[str, object] = {}
+        if lexical_profile_version is not None:
+            mismatched = self.count_profile_version_mismatches("lexical_profile_version", lexical_profile_version)
+            profiles["lexical"] = {
+                "target": lexical_profile_version,
+                "matching": max(0, doc_count - mismatched),
+                "mismatched": mismatched,
+                "sample_mismatched_item_keys": self.list_item_keys_with_profile_mismatch(
+                    "lexical_profile_version",
+                    lexical_profile_version,
+                    limit=sample_limit,
+                ),
+            }
+        if vector_profile_version is not None:
+            mismatched = self.count_profile_version_mismatches("vector_profile_version", vector_profile_version)
+            profiles["vector"] = {
+                "target": vector_profile_version,
+                "matching": max(0, doc_count - mismatched),
+                "mismatched": mismatched,
+                "sample_mismatched_item_keys": self.list_item_keys_with_profile_mismatch(
+                    "vector_profile_version",
+                    vector_profile_version,
+                    limit=sample_limit,
+                ),
+            }
+        if profiles:
+            summary["profiles"] = profiles
+        return summary
 
     def set_item_citation_key(self, item_key: str, citation_key: str) -> bool:
         return self.set_item_structured_fields(item_key, citation_key=citation_key)

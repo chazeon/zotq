@@ -441,3 +441,47 @@ def test_inspect_structured_fields_reports_missing_counts_and_samples(tmp_path: 
         assert len(fields["doi"]["sample_missing_item_keys"]) == 1
     finally:
         index.close()
+
+
+def test_inspect_structured_fields_reports_profile_version_mismatches(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item_match = Item(key="MATCH", item_type="journalArticle", title="Match")
+        item_mismatch = Item(key="MISMATCH", item_type="journalArticle", title="Mismatch")
+
+        index.upsert_item(
+            item=item_match,
+            chunks=_chunks(item_match.key, "match text"),
+            full_text="match text",
+            lexical_profile_version=2,
+            vector_profile_version=3,
+        )
+        index.upsert_item(
+            item=item_mismatch,
+            chunks=_chunks(item_mismatch.key, "mismatch text"),
+            full_text="mismatch text",
+            lexical_profile_version=1,
+            vector_profile_version=1,
+        )
+
+        summary = index.inspect_structured_fields(
+            sample_limit=1,
+            lexical_profile_version=2,
+            vector_profile_version=3,
+        )
+
+        profiles = summary["profiles"]
+        lexical = profiles["lexical"]
+        vector = profiles["vector"]
+
+        assert lexical["target"] == 2
+        assert lexical["matching"] == 1
+        assert lexical["mismatched"] == 1
+        assert lexical["sample_mismatched_item_keys"] == ["MISMATCH"]
+
+        assert vector["target"] == 3
+        assert vector["matching"] == 1
+        assert vector["mismatched"] == 1
+        assert vector["sample_mismatched_item_keys"] == ["MISMATCH"]
+    finally:
+        index.close()

@@ -424,13 +424,21 @@ class MockIndexService:
         )
 
     def inspect_index(self, *, sample_limit: int = 5) -> dict[str, object]:
-        lexical = self._lexical.inspect_structured_fields(sample_limit=sample_limit)
-        return {
+        lexical = self._lexical.inspect_structured_fields(
+            sample_limit=sample_limit,
+            lexical_profile_version=self._config.lexical_profile_version,
+            vector_profile_version=self._config.vector_profile_version,
+        )
+        payload: dict[str, object] = {
             "documents": lexical.get("documents", 0),
             "chunks": self._lexical.chunk_count(),
             "vectors": self._vector.chunk_count(),
             "fields": lexical.get("fields", {}),
         }
+        profiles = lexical.get("profiles")
+        if isinstance(profiles, dict):
+            payload["profiles"] = profiles
+        return payload
 
     def search(self, query: QuerySpec):
         status = self.status()

@@ -150,6 +150,7 @@ Click CLI
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Normalized metadata/identifier/creator tables (`item_fields`, `identifiers`, `item_creators`).
   - Split lexical/vector hash incremental sync with resumable source + ingest checkpoints.
+  - `index inspect` profile-version mismatch reporting against configured lexical/vector targets.
   - `collection export` command path (source-backed pagination + batched BibTeX export).
 - Still transitional:
   - `documents` remains the canonical raw item-json row during migration.
@@ -343,6 +344,7 @@ CREATE VIRTUAL TABLE lexical_fts USING fts5(
   - Reports index readiness, counts, last sync timestamp, embedding model.
 - `index inspect`
   - Reports structured field coverage/missingness and sample item keys for gaps.
+  - Reports lexical/vector profile-version mismatch counts and sample mismatched item keys against configured targets.
 - `index sync`
   - Incremental update from source checkpoints (lexical + vector).
 - `index sync --full`
@@ -656,7 +658,8 @@ src/zotq/
    - Keep compatibility read paths until migration is validated.
 2. Add projection/version migration controls:
    - Apply `lexical_profile_version`/`vector_profile_version` across all relevant stores.
-   - Provide explicit migration command/reporting for version mismatch counts.
+   - Reporting for version mismatch counts is now available via `index inspect`.
+   - Provide an explicit migration command/workflow for version mismatch remediation.
 3. Improve source checkpointing fidelity:
    - Add source watermark/checkpoint support beyond offset paging where adapters can provide it.
    - Ensure restart logic handles source-order drift safely.

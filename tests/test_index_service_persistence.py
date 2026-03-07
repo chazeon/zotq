@@ -256,3 +256,42 @@ def test_lexical_profile_version_bump_skips_reembed(tmp_path: Path, monkeypatch:
         assert calls["count"] == 0
     finally:
         bumped.close()
+
+
+def test_index_inspect_reports_profile_version_mismatches(tmp_path: Path) -> None:
+    base_cfg = IndexConfig(
+        index_dir=str(tmp_path / "index"),
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=1,
+        vector_profile_version=1,
+    )
+    service = MockIndexService(base_cfg)
+    try:
+        service.sync(full=True, items=[Item(key="K1", title="One")])
+    finally:
+        service.close()
+
+    bumped_cfg = IndexConfig(
+        index_dir=base_cfg.index_dir,
+        enabled=True,
+        embedding_provider="local",
+        embedding_model="test",
+        lexical_profile_version=2,
+        vector_profile_version=3,
+    )
+    bumped = MockIndexService(bumped_cfg)
+    try:
+        inspect = bumped.inspect_index(sample_limit=2)
+        profiles = inspect["profiles"]
+        assert profiles["lexical"]["target"] == 2
+        assert profiles["lexical"]["matching"] == 0
+        assert profiles["lexical"]["mismatched"] == 1
+        assert profiles["lexical"]["sample_mismatched_item_keys"] == ["K1"]
+        assert profiles["vector"]["target"] == 3
+        assert profiles["vector"]["matching"] == 0
+        assert profiles["vector"]["mismatched"] == 1
+        assert profiles["vector"]["sample_mismatched_item_keys"] == ["K1"]
+    finally:
+        bumped.close()

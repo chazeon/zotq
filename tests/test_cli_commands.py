@@ -716,3 +716,16 @@ def test_index_inspect_returns_field_coverage_summary() -> None:
     assert "citation_key" in fields
     assert "journal" in fields
     assert isinstance(fields["doi"]["sample_missing_item_keys"], list)
+
+
+def test_index_inspect_returns_profile_mismatch_summary() -> None:
+    runner = CliRunner()
+    result = invoke_remote(runner, ["--output", "json", "index", "inspect", "--sample-limit", "2"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "profiles" in payload
+    assert payload["profiles"]["lexical"]["target"] == 1
+    assert payload["profiles"]["vector"]["target"] == 1
+    assert payload["profiles"]["lexical"]["mismatched"] == 0
+    assert payload["profiles"]["vector"]["mismatched"] == 0

@@ -177,6 +177,7 @@ Source collection progress (`offset` + collected item keys) is also checkpointed
 - `--field doi|journal`: patch missing values from source metadata pages.
 - `--field all`: run all enrichers in one pass.
 `index inspect` reports structured-field coverage from the registry-backed store (including DOI, citation key, journal, ISSN, volume, pages, language, and journal abbreviation) with sample item keys.
+It also reports lexical/vector profile-version mismatch counts and sample mismatched item keys against the configured `lexical_profile_version` and `vector_profile_version` targets.
 
 ### Migration Status
 - Current status: in-progress migration (not final cutover yet).
@@ -184,6 +185,7 @@ Source collection progress (`offset` + collected item keys) is also checkpointed
   - Field-aware lexical projection (`lexical_docs`, `lexical_fts`).
   - Structured metadata tables (`item_fields`, `identifiers`, `item_creators`).
   - Split hash incremental sync and resume checkpoints.
+  - `index inspect` profile-version mismatch reporting.
   - `collection export` command surface and source-backed pagination/batching flow.
 - Still compatibility-backed:
   - `documents` remains the canonical item-json row store during transition.
