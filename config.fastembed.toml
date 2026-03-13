@@ -1,0 +1,35 @@
+active_profile = "fastembed_eval"
+
+[profiles.fastembed_eval]
+mode = "local-api"
+output = "table"
+
+[profiles.fastembed_eval.search]
+default_mode = "hybrid"
+allow_fallback = true
+alpha = 0.5
+lexical_k = 100
+vector_k = 100
+
+[profiles.fastembed_eval.index]
+enabled = true
+index_dir = "./.zotq-index-fastembed-eval"
+vector_backend = "sqlite-vec"
+embedding_provider = "portable"
+embedding_model = "BAAI/bge-small-en-v1.5"
+embedding_timeout_seconds = 30
+embedding_max_retries = 2
+
+[profiles.fastembed_eval.local_api]
+base_url = "http://127.0.0.1:23119"
+api_key = ""
+timeout_seconds = 10
+library_id = "0"
+
+[profiles.fastembed_eval.remote]
+base_url = ""
+bearer_token = ""
+api_key = ""
+timeout_seconds = 15
+verify_tls = true
+library_id = "0"

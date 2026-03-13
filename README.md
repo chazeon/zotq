@@ -195,6 +195,8 @@ When an adapter exposes watermark/cursor paging, `zotq` uses that checkpoint pat
 - `--field citation-key` (default): BBT RPC/BibTeX fallback enrichment.
 - `--field doi|journal`: patch missing values from source metadata pages.
 - `--field all`: run all enrichers in one pass.
+`index sync` and `index rebuild` cache unresolved citation-key enrichment misses to avoid repeating expensive lookups on every metadata-only run.
+Run `index enrich --field citation-key` when you want to retry unresolved citation keys explicitly.
 `index inspect` reports structured-field coverage from the registry-backed store (including DOI, citation key, journal, ISSN, volume, pages, language, and journal abbreviation) with sample item keys.
 It also reports lexical/vector profile-version mismatch counts and sample mismatched item keys against the configured `lexical_profile_version` and `vector_profile_version` targets.
 For vector backend cutovers, `index inspect` includes `vector_backend` and `vector_migration` summary fields (legacy rows detected/migrated).

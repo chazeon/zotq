@@ -13,6 +13,7 @@ class _EnrichmentSourceStub:
         self._rpc = dict(rpc or {})
         self._bibtex = bibtex
         self.rpc_batch_calls = 0
+        self.bibtex_batch_calls = 0
         self.single_bibtex_calls = 0
 
     def health(self) -> dict[str, str]:
@@ -48,6 +49,7 @@ class _EnrichmentSourceStub:
         return {key: value for key, value in self._rpc.items() if key in keys}
 
     def get_items_bibtex(self, keys: list[str]) -> str | None:
+        self.bibtex_batch_calls += 1
         return self._bibtex
 
     def get_item_bibliography(self, key: str, *, style: str | None = None, locale: str | None = None, linkwrap: bool | None = None):
@@ -125,6 +127,47 @@ def test_index_sync_bibtex_batch_parse_ignores_comment_entries_without_fallback_
 
     assert [hit.item.key for hit in result.hits] == ["K2"]
     assert source.single_bibtex_calls == 0
+
+
+def test_index_sync_skips_repeating_unresolved_citation_key_fallbacks() -> None:
+    source = _EnrichmentSourceStub(
+        items=[Item(key="K1", title="Doc One"), Item(key="K2", title="Doc Two")],
+        rpc={},
+        bibtex=None,
+    )
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+    first_batch_calls = source.bibtex_batch_calls
+    first_single_calls = source.single_bibtex_calls
+    assert first_batch_calls >= 1
+    assert first_single_calls >= 1
+
+    client.index_sync(full=False)
+
+    assert source.bibtex_batch_calls == first_batch_calls
+    assert source.single_bibtex_calls == first_single_calls
+
+
+def test_index_enrich_citation_key_retries_unresolved_keys() -> None:
+    source = _EnrichmentSourceStub(
+        items=[Item(key="K1", title="Doc One"), Item(key="K2", title="Doc Two")],
+        rpc={},
+        bibtex=None,
+    )
+    client = _build_client(source)
+
+    client.index_sync(full=True)
+    cached_batch_calls = source.bibtex_batch_calls
+    cached_single_calls = source.single_bibtex_calls
+    client.index_sync(full=False)
+    assert source.bibtex_batch_calls == cached_batch_calls
+    assert source.single_bibtex_calls == cached_single_calls
+
+    client.index_enrich(field="citation-key")
+
+    assert source.bibtex_batch_calls > cached_batch_calls
+    assert source.single_bibtex_calls > cached_single_calls
 
 
 def test_index_enrich_doi_updates_missing_doi_in_place() -> None:

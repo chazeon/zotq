@@ -7,5 +7,9 @@ def test_bibtexparser_dependency_imports() -> None:
     assert importlib.import_module("bibtexparser") is not None
 
 
+def test_fastembed_dependency_imports() -> None:
+    assert importlib.import_module("fastembed") is not None
+
+
 def test_sqlite_vec_dependency_imports() -> None:
     assert importlib.import_module("sqlite_vec") is not None

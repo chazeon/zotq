@@ -306,13 +306,44 @@ class ZotQueryClient:
 
         return resolved
 
-    def _enrich_field_citation_key(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
+    def _enrich_field_citation_key(
+        self,
+        *,
+        progress: ProgressCallback | None = None,
+        skip_known_unresolved: bool = False,
+    ) -> dict[str, int]:
         missing = self._index.list_items_missing_field("citation_key")
         total_missing = len(missing)
         if total_missing == 0:
+            clear_state = getattr(self._index, "clear_citation_key_enrich_state", None)
+            if callable(clear_state):
+                clear_state()
             return {"missing": 0, "updated": 0, "remaining": 0}
 
-        total_work = max(1, total_missing * 2)
+        known_unresolved: set[str] = set()
+        if skip_known_unresolved:
+            get_state = getattr(self._index, "get_citation_key_enrich_state", None)
+            if callable(get_state):
+                state = get_state()
+                if isinstance(state, dict):
+                    raw = state.get("unresolved_keys")
+                    if isinstance(raw, list):
+                        for value in raw:
+                            key = str(value).strip()
+                            if key:
+                                known_unresolved.add(key)
+
+        pending = [key for key in missing if key not in known_unresolved]
+        if not pending:
+            if progress is not None:
+                progress("enrich", 1, 1)
+            write_state = getattr(self._index, "write_citation_key_enrich_state", None)
+            if callable(write_state):
+                write_state(unresolved_keys=missing)
+            return {"missing": total_missing, "updated": 0, "remaining": total_missing}
+
+        total_pending = len(pending)
+        total_work = max(1, total_pending * 2)
         if progress is not None:
             progress("enrich", 0, total_work)
 
@@ -320,22 +351,34 @@ class ZotQueryClient:
         if progress is not None:
 
             def resolve_progress(_: str, current: int, __: int | None) -> None:
-                progress("enrich", min(current, total_missing), total_work)
+                progress("enrich", min(current, total_pending), total_work)
 
-        resolved = self._resolve_citation_keys_for_item_keys(missing, progress=resolve_progress)
+        resolved = self._resolve_citation_keys_for_item_keys(pending, progress=resolve_progress)
         updated = 0
-        for index, item_key in enumerate(missing, start=1):
+        updated_keys: set[str] = set()
+        for index, item_key in enumerate(pending, start=1):
             citation_key = resolved.get(item_key)
             if not citation_key:
                 if progress is not None:
-                    progress("enrich", total_missing + index, total_work)
+                    progress("enrich", total_pending + index, total_work)
                 continue
             if self._index.set_item_citation_key(item_key, citation_key):
                 updated += 1
+                updated_keys.add(item_key)
             if progress is not None:
-                progress("enrich", total_missing + index, total_work)
+                progress("enrich", total_pending + index, total_work)
 
-        remaining = max(0, total_missing - updated)
+        unresolved = [key for key in missing if key not in updated_keys]
+        if unresolved:
+            write_state = getattr(self._index, "write_citation_key_enrich_state", None)
+            if callable(write_state):
+                write_state(unresolved_keys=unresolved)
+        else:
+            clear_state = getattr(self._index, "clear_citation_key_enrich_state", None)
+            if callable(clear_state):
+                clear_state()
+
+        remaining = len(unresolved)
         return {"missing": total_missing, "updated": updated, "remaining": remaining}
 
     def _enrich_field_from_source_metadata(
@@ -406,15 +449,20 @@ class ZotQueryClient:
         results: dict[str, dict[str, int]] = {}
         for name in field_order:
             if name == "citation-key":
-                results[name] = self._enrich_field_citation_key(progress=progress)
+                results[name] = self._enrich_field_citation_key(progress=progress, skip_known_unresolved=False)
             elif name == "doi":
                 results[name] = self._enrich_field_from_source_metadata("doi", progress=progress)
             elif name == "journal":
                 results[name] = self._enrich_field_from_source_metadata("journal", progress=progress)
         return results
 
-    def index_enrich_citation_keys(self, *, progress: ProgressCallback | None = None) -> dict[str, int]:
-        return self._enrich_field_citation_key(progress=progress)
+    def index_enrich_citation_keys(
+        self,
+        *,
+        progress: ProgressCallback | None = None,
+        skip_known_unresolved: bool = False,
+    ) -> dict[str, int]:
+        return self._enrich_field_citation_key(progress=progress, skip_known_unresolved=skip_known_unresolved)
 
     def _resolve_citation_key_for_item(self, *, item_key: str, item: Item, prefer_mode: str) -> tuple[str | None, str | None]:
         candidates: list[tuple[str, Callable[[], str | None]]] = [
@@ -825,7 +873,7 @@ class ZotQueryClient:
         else:
             items = self._collect_all_items(progress=progress, checkpoint_scope="sync", full=full)
         status = self._index.sync(items=items, full=full, progress=progress)
-        self.index_enrich_citation_keys(progress=progress)
+        self.index_enrich_citation_keys(progress=progress, skip_known_unresolved=not full)
         clear_collect = getattr(self._index, "clear_collect_checkpoint", None)
         if callable(clear_collect):
             clear_collect()
@@ -834,7 +882,7 @@ class ZotQueryClient:
     def index_rebuild(self, *, progress: ProgressCallback | None = None):
         items = self._collect_all_items(progress=progress, checkpoint_scope="rebuild", full=True)
         status = self._index.rebuild(items=items, progress=progress)
-        self.index_enrich_citation_keys(progress=progress)
+        self.index_enrich_citation_keys(progress=progress, skip_known_unresolved=False)
         clear_collect = getattr(self._index, "clear_collect_checkpoint", None)
         if callable(clear_collect):
             clear_collect()

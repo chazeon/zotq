@@ -51,6 +51,13 @@ class CheckpointStore:
             return collect
         return None
 
+    def citation_key_enrich_state(self) -> dict[str, object] | None:
+        payload = self.read()
+        state = payload.get("citation_key_enrich")
+        if isinstance(state, dict):
+            return state
+        return None
+
     def write_ingest(
         self,
         *,
@@ -107,4 +114,27 @@ class CheckpointStore:
         payload = self.read()
         if "collect" in payload:
             payload.pop("collect", None)
+            self._write_payload(payload)
+
+    def write_citation_key_enrich(self, *, unresolved_keys: list[str]) -> None:
+        payload = self.read()
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in unresolved_keys:
+            key = str(raw).strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(key)
+
+        payload["citation_key_enrich"] = {
+            "unresolved_keys": cleaned,
+            "updated_at": datetime.now().astimezone().isoformat(),
+        }
+        self._write_payload(payload)
+
+    def clear_citation_key_enrich(self) -> None:
+        payload = self.read()
+        if "citation_key_enrich" in payload:
+            payload.pop("citation_key_enrich", None)
             self._write_payload(payload)

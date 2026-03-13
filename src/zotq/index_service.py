@@ -499,6 +499,15 @@ class MockIndexService:
     def clear_collect_checkpoint(self) -> None:
         self._checkpoints.clear_collect()
 
+    def get_citation_key_enrich_state(self) -> dict[str, object] | None:
+        return self._checkpoints.citation_key_enrich_state()
+
+    def write_citation_key_enrich_state(self, *, unresolved_keys: list[str]) -> None:
+        self._checkpoints.write_citation_key_enrich(unresolved_keys=unresolved_keys)
+
+    def clear_citation_key_enrich_state(self) -> None:
+        self._checkpoints.clear_citation_key_enrich()
+
     def list_items_missing_field(self, field: str) -> list[str]:
         return self._lexical.list_item_keys_missing_field(field)
 
