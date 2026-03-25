@@ -49,9 +49,29 @@ class _PythonVectorIndex:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
-        self._init_schema()
+        try:
+            self._init_schema()
+        except Exception:
+            self._conn.close()
+            raise
+
+    def _vectors_table_is_virtual(self) -> bool:
+        row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vectors'"
+        ).fetchone()
+        if row is None:
+            return False
+        definition = str(row["sql"] or "").upper()
+        return "CREATE VIRTUAL TABLE" in definition
 
     def _init_schema(self) -> None:
+        if self._vectors_table_is_virtual():
+            raise ValueError(
+                "Vector backend mismatch at "
+                f"{self._db_path}: existing vectors table is sqlite-vec virtual storage, "
+                "but configured backend is python. Set vector_backend=sqlite-vec for this index "
+                "or rebuild into a fresh index_dir with vector_backend=python."
+            )
         self._conn.executescript(
             """
             PRAGMA journal_mode=WAL;

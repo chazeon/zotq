@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 import hashlib
+from pathlib import Path
+import re
 import sqlite3
 from typing import ClassVar
-from difflib import SequenceMatcher
-from pathlib import Path
 
 from ..models import ChunkRecord, Item, QuerySpec, SearchHit
 
@@ -22,6 +23,7 @@ class StructuredFieldDef:
 
 class LexicalIndex:
     """Persistent lexical index built on SQLite + FTS5."""
+    _FTS_TOKEN_RE: ClassVar[re.Pattern[str]] = re.compile(r"\w+", re.UNICODE)
 
     _STRUCTURED_FIELDS: ClassVar[tuple[StructuredFieldDef, ...]] = (
         StructuredFieldDef(name="doi", item_attr="doi", normalizer="doi", identifier_type="doi"),
@@ -765,9 +767,13 @@ class LexicalIndex:
         if not query.text:
             return self._search_by_filters_only(query, mode_name="keyword")
 
+        fts_query = self._safe_fts_match_query(query.text)
+        if not fts_query:
+            return self._search_by_filters_only(query, mode_name="keyword")
+
         filter_where, filter_params = self._structured_filter_sql(query, table_alias="items")
         where_clauses = ["lexical_fts MATCH ?"]
-        params: list[object] = [query.text]
+        params: list[object] = [fts_query]
         if filter_where:
             where_clauses.append(filter_where)
             params.extend(filter_params)
@@ -851,6 +857,13 @@ class LexicalIndex:
         for score, _, _, item in sliced:
             hits.append(SearchHit(item=item, score=score, score_breakdown={"fuzzy": score}))
         return hits
+
+    @classmethod
+    def _safe_fts_match_query(cls, value: str) -> str:
+        tokens = [token for token in cls._FTS_TOKEN_RE.findall((value or "").strip()) if token]
+        if not tokens:
+            return ""
+        return " ".join(f'"{token}"' for token in tokens)
 
     @staticmethod
     def _is_attachment(item: Item) -> bool:

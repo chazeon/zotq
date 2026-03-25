@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from zotq.errors import ConfigError
 from zotq.index_service import MockIndexService
 from zotq.models import IndexConfig, VectorBackend, VectorRecord
 from zotq.storage.vector_index import VectorIndex
@@ -104,3 +105,31 @@ def test_sqlite_vec_migration_rejects_legacy_dimension_mismatch(tmp_path: Path) 
     with pytest.raises(ValueError, match="Legacy vector dimension mismatch"):
         idx = VectorIndex(db_path, backend=VectorBackend.SQLITE_VEC)
         idx.close()
+
+
+def test_python_backend_rejects_sqlite_vec_vectors_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "vector.sqlite3"
+    seeded = VectorIndex(db_path, backend=VectorBackend.SQLITE_VEC)
+    try:
+        seeded.upsert_item("ITEM-A", [_vector("ITEM-A:0", "ITEM-A", 0, [1.0, 0.0])])
+    finally:
+        seeded.close()
+
+    with pytest.raises(ValueError, match="Vector backend mismatch"):
+        VectorIndex(db_path, backend=VectorBackend.PYTHON)
+
+
+def test_index_service_surfaces_backend_mismatch_as_config_error(tmp_path: Path) -> None:
+    index_dir = tmp_path / "index"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    db_path = index_dir / "vector.sqlite3"
+
+    seeded = VectorIndex(db_path, backend=VectorBackend.SQLITE_VEC)
+    try:
+        seeded.upsert_item("ITEM-A", [_vector("ITEM-A:0", "ITEM-A", 0, [1.0, 0.0])])
+    finally:
+        seeded.close()
+
+    cfg = IndexConfig(enabled=True, index_dir=str(index_dir), vector_backend=VectorBackend.PYTHON)
+    with pytest.raises(ConfigError, match="Vector backend mismatch"):
+        MockIndexService(cfg)

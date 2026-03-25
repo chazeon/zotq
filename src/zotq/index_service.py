@@ -7,15 +7,27 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import sqlite3
 from time import perf_counter
 
 from .embeddings import build_embedding_provider
-from .errors import IndexNotReadyError, ModeNotSupportedError
-from .models import BackendCapabilities, IndexConfig, IndexStatus, Item, QuerySpec, SearchHit, SearchMode, VectorRecord
+from .errors import ConfigError, IndexNotReadyError, ModeNotSupportedError
+from .models import (
+    BackendCapabilities,
+    ChunkRecord,
+    IndexConfig,
+    IndexStatus,
+    Item,
+    QuerySpec,
+    SearchHit,
+    SearchMode,
+    VectorRecord,
+)
 from .pipeline import chunk_text, extract_item_text
 from .storage import CheckpointStore, LexicalIndex, VectorIndex
 
 ProgressCallback = Callable[[str, int, int | None], None]
+REMOTE_EMBEDDING_PROVIDERS = {"openai", "ollama", "gemini", "google", "google-gemini"}
 
 
 @dataclass
@@ -25,6 +37,16 @@ class StageTiming:
     events: int
     current: int
     total: int | None
+
+
+@dataclass
+class PendingVectorIngest:
+    item_key: str
+    item_index: int
+    current_done: int
+    vector_hash: str
+    vector_profile_version: int
+    chunks: list[ChunkRecord]
 
 
 class RetrievalBenchmarkHarness:
@@ -105,13 +127,54 @@ class MockIndexService:
     def __init__(self, config: IndexConfig) -> None:
         self._config = config
         self._index_dir = config.expanded_index_dir()
-        self._index_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._index_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:  # pragma: no cover - platform-specific filesystem failures
+            raise ConfigError(
+                f"Failed to initialize index_dir at '{self._index_dir}': {exc}. "
+                "Set a writable index_dir in config or via ZOTQ_INDEX_DIR."
+            ) from exc
 
         self._embedding = build_embedding_provider(config)
-        self._lexical = LexicalIndex(self._index_dir / "lexical.sqlite3")
-        self._vector = VectorIndex(self._index_dir / "vector.sqlite3", backend=config.vector_backend)
+        provider = (config.embedding_provider or "").strip().lower()
+        self._vector_embed_batch_size = 64 if provider in REMOTE_EMBEDDING_PROVIDERS else 1
+        lexical_path = self._index_dir / "lexical.sqlite3"
+        try:
+            self._lexical = LexicalIndex(lexical_path)
+        except sqlite3.Error as exc:
+            raise ConfigError(self._format_index_sqlite_error("lexical", lexical_path, exc)) from exc
+
+        vector_path = self._index_dir / "vector.sqlite3"
+        try:
+            self._vector = VectorIndex(vector_path, backend=config.vector_backend)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise ConfigError(str(exc)) from exc
+        except sqlite3.Error as exc:
+            raise ConfigError(self._format_index_sqlite_error("vector", vector_path, exc)) from exc
         self._vector_migration = self._vector.migration_report()
         self._checkpoints = CheckpointStore(self._index_dir / "checkpoints.json")
+
+    @staticmethod
+    def _format_index_sqlite_error(kind: str, db_path: object, exc: sqlite3.Error) -> str:
+        detail = str(exc).strip() or exc.__class__.__name__
+        message = f"Failed to initialize {kind} index database at '{db_path}': {detail}."
+        if "unable to open database file" in detail.lower():
+            message += " Set a writable index_dir in config or via ZOTQ_INDEX_DIR."
+        return message
+
+    def _embed_texts_batched(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        batch_size = max(1, int(self._vector_embed_batch_size))
+        if len(texts) <= batch_size:
+            return self._embedding.embed_texts(texts)
+
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            vectors.extend(self._embedding.embed_texts(texts[start : start + batch_size]))
+        return vectors
 
     def _last_sync_at(self) -> datetime | None:
         payload = self._checkpoints.read()
@@ -283,6 +346,53 @@ class MockIndexService:
     ) -> None:
         total = total_override if total_override is not None else len(items)
         remaining_keys = [item.key for item in items]
+        pending_items: list[PendingVectorIngest] = []
+        pending_texts: list[str] = []
+
+        def flush_pending_vectors() -> None:
+            nonlocal pending_items, pending_texts
+            if not pending_items:
+                return
+
+            embeddings = self._embed_texts_batched(pending_texts) if pending_texts else []
+            offset = 0
+            for pending in pending_items:
+                chunk_count = len(pending.chunks)
+                chunk_embeddings = embeddings[offset : offset + chunk_count]
+                if chunk_count != len(chunk_embeddings):
+                    raise RuntimeError("Embedding response count mismatch during batched ingest.")
+                offset += chunk_count
+
+                vector_records: list[VectorRecord] = []
+                for chunk, embedding in zip(pending.chunks, chunk_embeddings):
+                    vector_records.append(
+                        VectorRecord(
+                            chunk_id=chunk.chunk_id,
+                            item_key=pending.item_key,
+                            ordinal=chunk.ordinal,
+                            embedding=embedding,
+                        )
+                    )
+                self._vector.upsert_item(pending.item_key, vector_records)
+                self._lexical.set_item_hashes(
+                    pending.item_key,
+                    vector_hash=pending.vector_hash,
+                    vector_profile_version=pending.vector_profile_version,
+                )
+                if checkpoint_mode:
+                    next_remaining = remaining_keys[pending.item_index:]
+                    self._checkpoints.write_ingest(
+                        mode=checkpoint_mode,
+                        total=total,
+                        done=pending.current_done,
+                        remaining_keys=next_remaining,
+                    )
+                if progress is not None:
+                    progress("index", pending.current_done, total)
+
+            pending_items = []
+            pending_texts = []
+
         for index, item in enumerate(items, start=1):
             current_done = done_offset + index
             content_hash = self._item_content_hash(item)
@@ -327,6 +437,7 @@ class MockIndexService:
             )
 
             if skip_unchanged and not lexical_changed and not vector_changed:
+                flush_pending_vectors()
                 # Persist migrated hash columns lazily so future syncs avoid fallback checks.
                 if (
                     existing_content_hash != content_hash
@@ -384,24 +495,23 @@ class MockIndexService:
             if vector_changed:
                 vector_text = self._item_vector_text(item)
                 vector_chunks = chunk_text(item.key, vector_text)
-                embeddings = self._embedding.embed_texts([chunk.text for chunk in vector_chunks]) if vector_chunks else []
-                vector_records: list[VectorRecord] = []
-                for chunk, embedding in zip(vector_chunks, embeddings):
-                    vector_records.append(
-                        VectorRecord(
-                            chunk_id=chunk.chunk_id,
-                            item_key=item.key,
-                            ordinal=chunk.ordinal,
-                            embedding=embedding,
-                        )
+                pending_items.append(
+                    PendingVectorIngest(
+                        item_key=item.key,
+                        item_index=index,
+                        current_done=current_done,
+                        vector_hash=vector_hash,
+                        vector_profile_version=current_vector_profile_version,
+                        chunks=vector_chunks,
                     )
-                self._vector.upsert_item(item.key, vector_records)
-                self._lexical.set_item_hashes(
-                    item.key,
-                    vector_hash=vector_hash,
-                    vector_profile_version=current_vector_profile_version,
                 )
+                if vector_chunks:
+                    pending_texts.extend(chunk.text for chunk in vector_chunks)
+                if len(pending_texts) >= self._vector_embed_batch_size:
+                    flush_pending_vectors()
+                continue
 
+            flush_pending_vectors()
             if checkpoint_mode:
                 next_remaining = remaining_keys[index:]
                 self._checkpoints.write_ingest(
@@ -412,6 +522,8 @@ class MockIndexService:
                 )
             if progress is not None:
                 progress("index", current_done, total)
+
+        flush_pending_vectors()
 
     def sync(
         self,

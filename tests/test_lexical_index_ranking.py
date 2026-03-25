@@ -393,6 +393,30 @@ def test_keyword_search_reads_from_items(tmp_path: Path) -> None:
         index.close()
 
 
+def test_keyword_search_handles_hyphenated_terms_without_fts_column_error(tmp_path: Path) -> None:
+    index = LexicalIndex(tmp_path / "lexical.sqlite3")
+    try:
+        item = Item(
+            key="KC55SQAR",
+            item_type="journalArticle",
+            title="Post-stishovite transition in hydrous aluminous SiO2",
+            abstract="Umemoto post-stishovite hydrous aluminous SiO2.",
+        )
+        _upsert(index, item, item.abstract or "")
+
+        hits = index.search_keyword(
+            QuerySpec(
+                text="Umemoto post-stishovite hydrous aluminous SiO2",
+                search_mode=SearchMode.KEYWORD,
+                limit=5,
+            ),
+        )
+
+        assert [hit.item.key for hit in hits] == ["KC55SQAR"]
+    finally:
+        index.close()
+
+
 def test_fuzzy_search_reads_from_items(tmp_path: Path) -> None:
     index = LexicalIndex(tmp_path / "lexical.sqlite3")
     try:

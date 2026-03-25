@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from zotq.errors import IndexNotReadyError
+from zotq.errors import ConfigError, IndexNotReadyError
 from zotq.index_service import MockIndexService
 from zotq.models import IndexConfig, Item
 
@@ -25,6 +25,15 @@ def test_index_status_persists_between_instances(tmp_path: Path) -> None:
     assert status.ready is True
     assert status.chunk_count >= 2
     assert status.document_count == 2
+
+
+def test_index_service_errors_with_unusable_index_dir(tmp_path: Path) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not-a-directory", encoding="utf-8")
+    cfg = IndexConfig(index_dir=str(blocked), enabled=True, embedding_provider="local", embedding_model="test")
+
+    with pytest.raises(ConfigError, match="Failed to initialize index_dir"):
+        MockIndexService(cfg)
 
 
 def test_index_sync_rebuild_fail_when_disabled(tmp_path: Path) -> None:
@@ -117,6 +126,28 @@ def test_non_full_sync_semantic_change_triggers_reembed(tmp_path: Path, monkeypa
         service.close()
 
 
+def test_full_sync_batches_embedding_requests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = IndexConfig(index_dir=str(tmp_path / "index"), enabled=True, embedding_provider="local", embedding_model="test")
+    service = MockIndexService(cfg)
+    try:
+        service._vector_embed_batch_size = 16  # type: ignore[attr-defined]
+        calls = {"count": 0}
+        original_embed_texts = service._embedding.embed_texts  # type: ignore[attr-defined]
+
+        def counting_embed_texts(texts: list[str]) -> list[list[float]]:
+            calls["count"] += 1
+            return original_embed_texts(texts)
+
+        monkeypatch.setattr(service._embedding, "embed_texts", counting_embed_texts)  # type: ignore[attr-defined]
+
+        items = [Item(key=f"K{i:03d}", title=f"Doc {i}") for i in range(130)]
+        service.sync(full=True, items=items)
+
+        assert calls["count"] < len(items)
+    finally:
+        service.close()
+
+
 def test_full_sync_resumes_from_checkpoint_after_interruption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = IndexConfig(index_dir=str(tmp_path / "index"), enabled=True, embedding_provider="local", embedding_model="test")
     items = [
@@ -127,6 +158,7 @@ def test_full_sync_resumes_from_checkpoint_after_interruption(tmp_path: Path, mo
 
     service = MockIndexService(cfg)
     try:
+        service._vector_embed_batch_size = 2  # type: ignore[attr-defined]
         original_embed_texts = service._embedding.embed_texts  # type: ignore[attr-defined]
         calls = {"count": 0}
 
@@ -145,6 +177,7 @@ def test_full_sync_resumes_from_checkpoint_after_interruption(tmp_path: Path, mo
 
     resumed_service = MockIndexService(cfg)
     try:
+        resumed_service._vector_embed_batch_size = 2  # type: ignore[attr-defined]
         resumed_calls = {"count": 0}
         resumed_orig_embed = resumed_service._embedding.embed_texts  # type: ignore[attr-defined]
         events: list[tuple[str, int, int | None]] = []
@@ -162,12 +195,12 @@ def test_full_sync_resumes_from_checkpoint_after_interruption(tmp_path: Path, mo
         )
 
         assert status.ready is True
-        assert resumed_calls["count"] == 2
+        assert resumed_calls["count"] == 1
         index_events = [event for event in events if event[0] == "index"]
         assert index_events
-        assert index_events[0] == ("index", 2, 3)
+        assert index_events[0] == ("index", 3, 3)
         assert index_events[-1] == ("index", 3, 3)
-        assert all(event[1] != 1 for event in index_events)
+        assert all(event[1] >= 3 for event in index_events)
 
         payload = resumed_service._checkpoints.read()  # type: ignore[attr-defined]
         assert "ingest" not in payload
