@@ -157,8 +157,22 @@ def test_portable_provider_fallback_to_local_hash_when_fastembed_missing(monkeyp
     assert provider.fallback_active is True
     assert provider.fallback_reason == "fastembed_unavailable"
     assert provider.runtime_backend == "local-hash"
+    assert provider.fallback_dimensions == 384
 
     first = provider.embed_text("mantle hydration")
     second = provider.embed_text("mantle hydration")
     assert first == second
     assert len(first) == provider.fallback_dimensions
+
+
+def test_portable_provider_unknown_model_uses_default_fallback_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zotq.embeddings import portable_provider
+
+    def _raise_module_not_found(_name: str):
+        raise ModuleNotFoundError("fastembed missing")
+
+    monkeypatch.setattr(portable_provider.importlib, "import_module", _raise_module_not_found)
+    provider = PortableLocalEmbeddingProvider(model="custom/model-v0")
+
+    assert provider.fallback_active is True
+    assert provider.fallback_dimensions == 256

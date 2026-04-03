@@ -7,14 +7,35 @@ from typing import Any
 
 from .local_provider import LocalEmbeddingProvider
 
+_DEFAULT_FALLBACK_DIMENSIONS = 256
+_MODEL_FALLBACK_DIMENSIONS = {
+    "baai/bge-small-en-v1.5": 384,
+    "baai/bge-base-en-v1.5": 768,
+    "baai/bge-large-en-v1.5": 1024,
+}
+
+
+def _resolve_fallback_dimensions(model: str, requested: int | None) -> int:
+    if requested is not None:
+        if requested <= 0:
+            raise ValueError("fallback_dimensions must be positive when provided.")
+        return requested
+
+    normalized = (model or "").strip().lower()
+    inferred = _MODEL_FALLBACK_DIMENSIONS.get(normalized)
+    if inferred is not None:
+        return inferred
+    return _DEFAULT_FALLBACK_DIMENSIONS
+
 
 class PortableLocalEmbeddingProvider:
     """Use fastembed when available, otherwise fallback to deterministic local hashing."""
 
-    def __init__(self, *, model: str, fallback_dimensions: int = 256) -> None:
+    def __init__(self, *, model: str, fallback_dimensions: int | None = None) -> None:
         self._model = model or "BAAI/bge-small-en-v1.5"
-        self._fallback = LocalEmbeddingProvider(model="local-hash-v1", dimensions=fallback_dimensions)
-        self._fallback_dimensions = fallback_dimensions
+        resolved_fallback_dimensions = _resolve_fallback_dimensions(self._model, fallback_dimensions)
+        self._fallback = LocalEmbeddingProvider(model="local-hash-v1", dimensions=resolved_fallback_dimensions)
+        self._fallback_dimensions = resolved_fallback_dimensions
         self._fastembed: Any | None = None
         self._fallback_active = False
         self._fallback_reason: str | None = None
